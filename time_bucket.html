@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>Time-Bucket Aggregator v2.10 - LogicHub</title>
+    <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css" />
+    <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
+    <py-config>
+        packages = ["pandas", "numpy"]
+    </py-config>
+    <style>
+        :root { --primary: #2c3e50; --accent: #e67e22; --bg: #f4f7f6; }
+        body { font-family: 'Segoe UI', 'Meiryo', sans-serif; background: var(--bg); margin: 0; padding: 0; }
+        
+        /* ロード画面のスタイル */
+        #loading-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255, 255, 255, 0.9); display: flex; flex-direction: column;
+            align-items: center; justify-content: center; z-index: 9999;
+        }
+        .spinner {
+            width: 50px; height: 50px; border: 5px solid #ddd; border-top: 5px solid var(--accent);
+            border-radius: 50%; animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        .container { max-width: 1400px; margin: 40px auto; background: white; padding: 40px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); position: relative; }
+        
+        /* ホームボタン */
+        .home-btn { position: absolute; top: 30px; left: 40px; text-decoration: none; color: #5f6368; font-weight: bold; border: 1px solid #ddd; padding: 8px 15px; border-radius: 8px; background: white; z-index: 100; transition: 0.2s; }
+        .home-btn:hover { background: #f1f3f4; }
+
+        header { text-align: center; border-bottom: 2px solid #eee; padding-bottom: 20px; margin-bottom: 40px; }
+        h1 { color: var(--primary); font-size: 26px; margin: 0; display: flex; align-items: center; justify-content: center; gap: 10px; }
+        
+        .card { background: #fff; border: 1px solid #e0e0e0; border-radius: 12px; padding: 25px; margin-bottom: 30px; }
+        .config-grid { display: grid; grid-template-columns: 1.5fr 1fr 1.5fr 1fr; gap: 20px; }
+        label { display: block; font-weight: 600; margin-bottom: 10px; font-size: 14px; color: #34495e; }
+        select, input { width: 100%; border: 1px solid #dcdfe6; border-radius: 8px; padding: 12px; box-sizing: border-box; font-size: 14px; transition: 0.3s; }
+        select:focus, input:focus { border-color: var(--accent); outline: none; }
+        
+        .btn-exec { background: var(--accent); color: white; border: none; padding: 16px; border-radius: 10px; font-weight: bold; cursor: pointer; width: 100%; margin-top: 15px; transition: 0.3s; font-size: 16px; box-shadow: 0 4px 15px rgba(230,126,34,0.3); }
+        .btn-exec:hover { background: #d35400; transform: translateY(-2px); }
+        
+        .btn-dl { background: white; border: 2px solid #27ae60; color: #27ae60; display: none; margin-top: 30px; padding: 12px 35px; border-radius: 8px; font-weight: bold; cursor: pointer; transition: 0.2s; text-decoration: none; display: none; text-align: center; }
+        .btn-dl:hover { background: #eafaf1; }
+
+        #output-area { margin-top: 40px; overflow-x: auto; border-radius: 10px; }
+        
+        /* テーブル装飾 */
+        .dataframe { width: 100%; border-collapse: collapse; font-size: 13px; border: 1px solid #ebeef5; }
+        .dataframe th { background: #34495e; color: white; padding: 15px 10px; border: 1px solid #2c3e50; white-space: nowrap; text-align: center; }
+        .dataframe td { padding: 12px 10px; border: 1px solid #ebeef5; text-align: right; color: #606266; }
+        
+        /* 組織名・商品名称の固定 */
+        .dataframe td:nth-child(1), .dataframe td:nth-child(2) { 
+            position: sticky; background: #f9f9f9; font-weight: 600; text-align: left; color: #303133; z-index: 2;
+        }
+        .dataframe td:nth-child(1) { left: 0; border-right: 1px solid #ddd; }
+        .dataframe td:nth-child(2) { left: 120px; border-right: 2px solid #ddd; }
+
+        .summary-info { background: #fdf6ec; padding: 18px; border-radius: 10px; margin-bottom: 20px; font-weight: bold; color: #e67e22; border-left: 8px solid #e67e22; }
+    </style>
+</head>
+<body>
+
+<div id="loading-overlay">
+    <div class="spinner"></div>
+    <p id="status-text" style="margin-top:20px; font-weight:bold; color: var(--primary);">システム準備中...</p>
+</div>
+
+<div class="container">
+    <a href="index.html" class="home-btn">🏠 Home</a>
+    <header>
+        <h1>📊 発注予測：期間集計カレンダー (v2.10)</h1>
+    </header>
+
+    <div class="card">
+        <div class="config-grid">
+            <div>
+                <label>1. 予測結果CSVを選択</label>
+                <input type="file" id="upload-file" accept=".csv">
+            </div>
+            <div>
+                <label>2. 集計単位</label>
+                <select id="period-unit">
+                    <option value="W-MON">週次 (月曜始)</option>
+                    <option value="MS">月次 (月初始)</option>
+                    <option value="D">日次</option>
+                </select>
+            </div>
+            <div>
+                <label>3. 出力レイアウト</label>
+                <select id="output-style">
+                    <option value="pivot">カレンダー形式 (日付を横軸に)</option>
+                    <option value="list">リスト形式 (縦並び一覧)</option>
+                </select>
+            </div>
+            <div>
+                <label>4. 集計対象列</label>
+                <input type="text" id="target-value" value="発注数" placeholder="発注数 または 中央値">
+            </div>
+        </div>
+        <button id="run-btn" class="btn-exec">⚡ 発注予測データをマージして集計を実行</button>
+    </div>
+
+    <div id="output-area"></div>
+    <div style="text-align: right;">
+        <button id="download-btn" class="btn-dl">💾 確定した集計データを保存</button>
+    </div>
+</div>
+
+<script type="py">
+import pandas as pd
+import io, asyncio
+from datetime import datetime
+from pyscript import when, document
+import js
+
+final_df_to_save = None
+
+# ロード完了
+js.document.getElementById("loading-overlay").style.display = "none"
+
+@when("click", "#run-btn")
+async def process_data(event):
+    global final_df_to_save
+    
+    # 実行用ローディングの表示
+    overlay = js.document.getElementById("loading-overlay")
+    js.document.getElementById("status-text").innerText = "データをマージ・集計中..."
+    overlay.style.display = "flex"
+    await asyncio.sleep(0.1) # UI描画のための待ち
+    
+    try:
+        unit = document.getElementById("period-unit").value
+        style = document.getElementById("output-style").value
+        target_col = document.getElementById("target-value").value
+        
+        file_list = document.getElementById("upload-file").files
+        if len(file_list) == 0: return
+        csv_text = await file_list.item(0).text()
+        
+        # 1. データの読み込み
+        df = pd.read_csv(io.StringIO(csv_text))
+        
+        # 2. 自動列マッピング
+        org_col = next((c for c in ['組織名', '組織名称', 'サプライヤー名'] if c in df.columns), '組織')
+        prod_col = next((c for c in ['商品名称', '商品名'] if c in df.columns), '商品')
+        
+        if '日付' not in df.columns:
+            js.document.getElementById("output-area").innerHTML = "<p style='color:red;'>エラー：『日付』列が見つかりません。</p>"
+            return
+        
+        df['日付'] = pd.to_datetime(df['日付'])
+        group_keys = [c for c in [org_col, prod_col] if c]
+        
+        # 3. 期間マージ
+        df_res = df.groupby(group_keys + [pd.Grouper(key='日付', freq=unit)])[target_col].sum().reset_index()
+        df_res = df_res.sort_values('日付')
+
+        # 4. 表示用期間ラベル
+        if unit == "D":
+            df_res['表示期間'] = df_res['日付'].dt.strftime('%m/%d')
+        elif "W" in unit:
+            df_res['表示期間'] = df_res['日付'].dt.strftime('%m/%d週')
+        else:
+            df_res['表示期間'] = df_res['日付'].dt.strftime('%Y/%m月')
+
+        # 5. レイアウト変換
+        if style == "pivot":
+            df_pivot = df_res.pivot_table(
+                index=group_keys, 
+                columns=['日付', '表示期間'], 
+                values=target_col, 
+                fill_value=0
+            )
+            df_pivot.columns = df_pivot.columns.get_level_values(1)
+            df_pivot.columns.name = None
+            df_final = df_pivot.reset_index()
+        else:
+            df_final = df_res[['表示期間'] + group_keys + [target_col]]
+
+        final_df_to_save = df_final
+        
+        # 6. 描画
+        output_div = js.document.getElementById("output-area")
+        output_div.innerHTML = f'<div class="summary-info">✅ マージ完了: {target_col} の {unit} 集計結果を表示しています。</div>'
+        output_div.innerHTML += df_final.to_html(index=False, classes='dataframe')
+        
+        js.document.getElementById("download-btn").style.display = "inline-block"
+        
+    except Exception as e:
+        js.document.getElementById("output-area").innerHTML = f"<p style='color:red;'>エラーが発生しました: {str(e)}</p>"
+    finally:
+        overlay.style.display = "none"
+
+@when("click", "#download-btn")
+def download_file(event):
+    global final_df_to_save
+    if final_df_to_save is None: return
+    
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    csv_str = final_df_to_save.to_csv(index=False, encoding='utf-8-sig')
+    blob = js.Blob.new([js.Uint8Array.new(list(b'\xef\xbb\xbf' + csv_str.encode('utf-8')))], {type: 'text/csv'})
+    url = js.URL.createObjectURL(blob)
+    link = js.document.createElement('a')
+    link.href = url
+    link.download = f"Summary_{ts}.csv"
+    link.click()
+    js.URL.revokeObjectURL(url)
+</script>
+
+</body>
+</html>

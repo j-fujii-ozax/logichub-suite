@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>Column Shuffler - LogicHub</title>
+    <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css" />
+    <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
+    <py-config>
+        packages = ["pandas"]
+    </py-config>
+    <style>
+        :root { --primary: #1a73e8; --accent: #27ae60; --bg: #f8f9fa; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); margin: 0; padding: 0; }
+        
+        #loading-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255, 255, 255, 0.9); display: flex; flex-direction: column;
+            align-items: center; justify-content: center; z-index: 9999;
+        }
+        .spinner {
+            width: 50px; height: 50px; border: 5px solid #ddd; border-top: 5px solid var(--primary);
+            border-radius: 50%; animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        .container { max-width: 1000px; margin: 40px auto; background: white; padding: 40px; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); position: relative; }
+        .home-btn { position: absolute; top: 30px; left: 40px; text-decoration: none; color: #5f6368; font-weight: bold; border: 1px solid #ddd; padding: 8px 15px; border-radius: 8px; }
+
+        header { text-align: center; border-bottom: 2px solid #eee; padding-bottom: 20px; margin-bottom: 30px; }
+        h1 { color: var(--primary); font-size: 24px; margin: 0; }
+        .card { background: #f8f9fa; border: 1px solid #e0e0e0; padding: 25px; border-radius: 12px; margin-bottom: 25px; }
+        textarea { width: 100%; height: 180px; padding: 15px; border: 1px solid #ccc; border-radius: 8px; font-family: monospace; font-size: 14px; box-sizing: border-box; }
+        .btn-exec { background: var(--primary); color: white; width: 100%; padding: 16px; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; font-size: 16px; }
+        .btn-dl { background: var(--accent); color: white; width: 100%; padding: 16px; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; font-size: 16px; margin-top: 20px; display: none; text-align: center; text-decoration: none; }
+        #output-area { margin-top: 30px; overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th { background: var(--primary); color: white; padding: 10px; border: 1px solid #174ea6; }
+        td { padding: 10px; border: 1px solid #eee; }
+    </style>
+</head>
+<body>
+
+<div id="loading-overlay">
+    <div class="spinner"></div>
+    <p id="status-text" style="margin-top:20px; font-weight:bold; color: var(--primary);">システム準備中...</p>
+</div>
+
+<div class="container">
+    <a href="index.html" class="home-btn">🏠 Home</a>
+    <header><h1>🔄 Column Shuffler</h1></header>
+
+    <div class="card">
+        <label style="font-weight:bold;">1. 元のCSV読込</label>
+        <input type="file" id="upload-file" accept=".csv">
+    </div>
+
+    <div class="card">
+        <label style="font-weight:bold;">2. 列構成 (並び順・名前変更)</label>
+        <textarea id="column-map" placeholder="列名 -> 新しい名前"></textarea>
+    </div>
+
+    <button id="run-btn" class="btn-exec">⚡ 変換とプレビューを実行</button>
+
+    <div id="output-area"></div>
+    <a id="download-btn" class="btn-dl">💾 変換後のデータをCSVで保存</a>
+</div>
+
+<script type="py">
+import pandas as pd
+import io, asyncio
+from datetime import datetime
+from pyscript import when, document
+import js
+
+# 起動完了
+js.document.getElementById("loading-overlay").style.display = "none"
+
+final_df = None
+
+@when("change", "#upload-file")
+async def on_file_upload(event):
+    file_list = document.getElementById("upload-file").files
+    if len(file_list) == 0: return
+    csv_text = await file_list.item(0).text()
+    df_temp = pd.read_csv(io.StringIO(csv_text), nrows=0)
+    document.getElementById("column-map").value = "\n".join(df_temp.columns.tolist())
+
+@when("click", "#run-btn")
+async def run_shuffle(event):
+    global final_df
+    overlay = js.document.getElementById("loading-overlay")
+    js.document.getElementById("status-text").innerText = "データ変換中..."
+    overlay.style.display = "flex"
+    await asyncio.sleep(0.1)
+    
+    try:
+        file_list = document.getElementById("upload-file").files
+        config_text = document.getElementById("column-map").value.strip()
+        if len(file_list) == 0: return
+        
+        df = pd.read_csv(io.StringIO(await file_list.item(0).text()))
+        mapping = []
+        rename_dict = {}
+        for line in config_text.split('\n'):
+            line = line.strip()
+            if not line: continue
+            if '->' in line:
+                parts = line.split('->')
+                old, new = parts[0].strip(), parts[1].strip()
+                mapping.append(old); rename_dict[old] = new
+            else:
+                mapping.append(line); rename_dict[line] = line
+
+        valid_cols = [c for c in mapping if c in df.columns]
+        final_df = df[valid_cols].rename(columns=rename_dict)
+        
+        output_div = js.document.getElementById("output-area")
+        output_div.innerHTML = "<h3>Preview (Max 100 rows)</h3>" + final_df.head(100).to_html(index=False)
+        js.document.getElementById("download-btn").style.display = "block"
+        
+    except Exception as e:
+        js.document.getElementById("output-area").innerHTML = f"<p style='color:red;'>エラー: {str(e)}</p>"
+    finally:
+        overlay.style.display = "none"
+
+@when("click", "#download-btn")
+def download_data(event):
+    global final_df
+    if final_df is None: return
+    csv_str = final_df.to_csv(index=False, encoding='utf-8-sig')
+    blob = js.Blob.new([js.Uint8Array.new(list(b'\xef\xbb\xbf' + csv_str.encode('utf-8')))], {type: 'text/csv'})
+    url = js.URL.createObjectURL(blob)
+    btn = js.document.getElementById("download-btn")
+    btn.href = url
+    btn.download = f"shuffled_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+</script>
+</body>
+</html>

@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>Production Scheduler v1.5 - LogicHub</title>
+    <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css" />
+    <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
+    <py-config>
+        packages = ["pandas", "numpy"]
+    </py-config>
+    <style>
+        :root { --primary: #2c3e50; --accent: #27ae60; --bg: #f4f7f6; }
+        body { font-family: 'Segoe UI', 'Meiryo', sans-serif; background: var(--bg); margin: 0; padding: 0; }
+        
+        /* ロード画面 */
+        #loading-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255, 255, 255, 0.9); display: flex; flex-direction: column;
+            align-items: center; justify-content: center; z-index: 9999;
+        }
+        .spinner {
+            width: 60px; height: 60px; border: 6px solid #f3f3f3; border-top: 6px solid var(--primary);
+            border-radius: 50%; animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        #status-text { margin-top: 20px; font-weight: bold; color: var(--primary); font-size: 18px; }
+
+        .container { max-width: 1500px; margin: 40px auto; background: white; padding: 40px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); position: relative; }
+        
+        /* ホームボタン */
+        .home-btn { position: absolute; top: 30px; left: 40px; text-decoration: none; color: #5f6368; font-weight: bold; border: 1px solid #ddd; padding: 8px 15px; border-radius: 8px; background: white; z-index: 100; transition: 0.2s; }
+        .home-btn:hover { background: #f1f3f4; }
+
+        header { text-align: center; border-bottom: 2px solid #eee; padding-bottom: 20px; margin-bottom: 40px; }
+        h1 { color: var(--primary); font-size: 26px; margin: 0; display: flex; align-items: center; justify-content: center; gap: 10px; }
+
+        .config-section { display: grid; grid-template-columns: repeat(2, 1fr); gap: 30px; margin-bottom: 40px; }
+        .config-card { background: #f8f9fa; padding: 25px; border-radius: 12px; border: 1px solid #e9ecef; }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; font-weight: bold; margin-bottom: 10px; font-size: 14px; color: #495057; }
+        input { width: 100%; padding: 12px; border: 1px solid #ced4da; border-radius: 8px; box-sizing: border-box; font-size: 14px; }
+
+        .btn-exec { background: var(--primary); color: white; padding: 18px; border: none; border-radius: 10px; width: 100%; cursor: pointer; font-weight: bold; font-size: 18px; margin-bottom: 40px; transition: 0.3s; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .btn-exec:hover { background: #1a252f; transform: translateY(-2px); }
+        
+        #output-area { margin-top: 40px; }
+        .summary-banner { background: #e8f4fd; border-left: 8px solid #3498db; padding: 25px; border-radius: 8px; margin-bottom: 30px; font-weight: bold; font-size: 16px; }
+
+        table { width: 100%; border-collapse: collapse; background: white; border: 1px solid #dee2e6; table-layout: fixed; }
+        th { background: #34495e; color: white; padding: 14px 10px; border: 1px solid #2c3e50; font-size: 13px; position: sticky; top: 0; z-index: 10; }
+        td { padding: 12px 10px; border: 1px solid #dee2e6; text-align: center; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        
+        .date-group { background: #f1f3f5; font-weight: bold; text-align: left !important; padding-left: 20px; color: #2c3e50; font-size: 14px; }
+        .line-badge { background: #e9ecef; padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: bold; color: #495057; border: 1px solid #dee2e6; }
+        .over-cap { color: #e03131; font-weight: bold; }
+        tr:hover td { background-color: #f8f9fa; }
+    </style>
+</head>
+<body>
+
+<div id="loading-overlay">
+    <div class="spinner"></div>
+    <p id="status-text">システム準備中...</p>
+</div>
+
+<div class="container">
+    <a href="index.html" class="home-btn">🏠 Home</a>
+    <header>
+        <h1>🏭 生産ライン計画レコメンダー v1.5</h1>
+    </header>
+
+    <div class="config-section">
+        <div class="config-card">
+            <div class="form-group">
+                <label>1. 予測結果CSV (発注数を含むもの)</label>
+                <input type="file" id="upload-file" accept=".csv">
+            </div>
+            <div class="form-group">
+                <label>2. 1ラインあたりの生産上限 (日産)</label>
+                <input type="number" id="daily-cap" value="5000">
+            </div>
+        </div>
+        <div class="config-card">
+            <div class="form-group">
+                <label>3. 着工リードタイム (日)</label>
+                <input type="number" id="lead-time" value="2">
+            </div>
+            <div class="form-group">
+                <label>4. 稼働ライン数</label>
+                <input type="number" id="line-count" value="2">
+            </div>
+        </div>
+    </div>
+
+    <button id="run-btn" class="btn-exec">⚡ スケジュール計算を開始</button>
+
+    <div id="output-area"></div>
+</div>
+
+<script type="py">
+import pandas as pd
+import io, math, asyncio
+from pyscript import when, document
+import js
+
+# 初期化完了
+js.document.getElementById("loading-overlay").style.display = "none"
+
+@when("click", "#run-btn")
+async def schedule_production(event):
+    file_list = document.getElementById("upload-file").files
+    if len(file_list) == 0: return
+    
+    overlay = js.document.getElementById("loading-overlay")
+    status_el = js.document.getElementById("status-text")
+    status_el.innerText = "計画作成・ライン割り当て中..."
+    overlay.style.display = "flex"
+    await asyncio.sleep(0.1) # UI描画のための待ち
+
+    try:
+        unit_cap = int(document.getElementById("daily-cap").value)
+        lead_time = int(document.getElementById("lead-time").value)
+        line_count = int(document.getElementById("line-count").value)
+        total_day_cap = unit_cap * line_count
+        
+        csv_text = await file_list.item(0).text()
+        df = pd.read_csv(io.StringIO(csv_text))
+        
+        # カラム名寄せ
+        org_col = next((c for c in ['組織名', '組織名称', 'サプライヤー名'] if c in df.columns), '組織')
+        prod_col = next((c for c in ['商品名称', '商品名'] if c in df.columns), '商品')
+        target_col = '発注数' if '発注数' in df.columns else ('中央値' if '中央値' in df.columns else df.columns[-1])
+
+        df['日付'] = pd.to_datetime(df['日付'])
+        df['着工予定日'] = df['日付'] - pd.to_timedelta(lead_time, unit='D')
+        
+        # 高速化処理
+        detail_needs = df.groupby(['着工予定日', org_col, prod_col])[target_col].sum().reset_index()
+        detail_needs = detail_needs.sort_values(['着工予定日', target_col], ascending=[True, False])
+        
+        grouped_needs = {d: group.to_dict('records') for d, group in detail_needs.groupby('着工予定日')}
+
+        backlog = {}
+        all_results = []
+        start_date = detail_needs['着工予定日'].min()
+        max_date = detail_needs['着工予定日'].max()
+        all_dates = pd.date_range(start=start_date, periods=(max_date - start_date).days + 15)
+
+        for d in all_dates:
+            day_rem_cap = total_day_cap
+            today_list = grouped_needs.get(d, [])
+            for row in today_list:
+                key = (row[org_col], row[prod_col])
+                backlog[key] = backlog.get(key, 0) + row[target_col]
+            
+            if not any(v > 0 for v in backlog.values()) and d > max_date:
+                break
+
+            for key, amount in list(backlog.items()):
+                if amount <= 0 or day_rem_cap <= 0: continue
+                prod_amount = min(amount, day_rem_cap)
+                start_pos = total_day_cap - day_rem_cap
+                l_start = math.floor(start_pos / unit_cap) + 1
+                l_end = math.floor((start_pos + prod_amount - 1) / unit_cap) + 1
+                line_str = f"Line {l_start}" if l_start == l_end else f"Line {l_start}-{l_end}"
+                
+                all_results.append({
+                    'd_str': d.strftime('%Y/%m/%d'),
+                    'org': key[0], 'prod': key[1], 'qty': int(prod_amount),
+                    'rem': int(amount - prod_amount), 'line': line_str
+                })
+                backlog[key] -= prod_amount
+                day_rem_cap -= prod_amount
+
+        # HTML高速レンダリング
+        html_list = [f'<div class="summary-banner">📊 シミュレーション完了: 総枠 {total_day_cap:,} / 日 ({line_count}ライン)</div>']
+        html_list.append('<table><thead><tr><th style="width:15%">組織</th><th style="width:35%">商品名称</th><th style="width:15%">計画投入量</th><th style="width:15%">未着工(繰越)</th><th style="width:20%">使用ライン</th></tr></thead><tbody>')
+        
+        curr_d = ""
+        for r in all_results:
+            if r['d_str'] != curr_d:
+                html_list.append(f"<tr><td colspan='5' class='date-group'>📅 着工予定日: {r['d_str']}</td></tr>")
+                curr_d = r['d_str']
+            bg_style = ' class="over-cap"' if r['rem'] > 0 else ''
+            html_list.append(f"<tr><td>{r['org']}</td><td>{r['prod']}</td><td><b>{r['qty']:,}</b></td><td{bg_style}>{r['rem']:,}</td><td><span class='line-badge'>{r['line']}</span></td></tr>")
+        
+        html_list.append("</tbody></table>")
+        js.document.getElementById("output-area").innerHTML = "".join(html_list)
+
+    except Exception as e:
+        js.document.getElementById("output-area").innerHTML = f"<p style='color:red;'>エラー: {str(e)}</p>"
+    finally:
+        overlay.style.display = "none"
+</script>
+
+</body>
+</html>
