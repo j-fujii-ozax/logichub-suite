@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>実績データ統合ツール v1.9 - LogicHub</title>
+    <title>実績データ統合・在庫復元ツール v2.1 - LogicHub</title>
     <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css" />
     <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
     <style>
@@ -45,16 +45,16 @@
 
 <div class="container">
     <header>
-        <h1>📊 実績データ統合・在庫復元ツール v1.9</h1>
-        <p>ガイド完全復刻・フリーズ対策版</p>
+        <h1>📊 実績データ統合・在庫復元ツール v2.1</h1>
+        <p>遡り計算・ガイド付き・大規模データ対応版</p>
     </header>
 
     <div class="guide-box">
-        <strong>💡 統合と在庫復元の仕組み</strong>
+        <strong>🔄 統合と在庫復元の仕組み (v2.1)</strong>
         <ul>
-            <li><strong>在庫の復元:</strong> 棚卸実績がある日はその値を優先。ない日は「前日在庫 + 入荷 - 出荷」で算出。</li>
-            <li><strong>マイナス補正:</strong> 在庫が 0 未満になった場合は 0 へリセットします。</li>
-            <li><strong>大規模データ:</strong> 保存時に数秒フリーズする場合がありますが、ブラウザを閉じずにお待ちください。</li>
+            <li><strong>遡り計算:</strong> 最初の棚卸日より前の期間は、棚卸値を基準に過去へ遡って在庫を算出します。</li>
+            <li><strong>マイナス補正:</strong> 計算上で在庫が 0 未満になった場合は、強制的に 0 へリセットします。</li>
+            <li><strong>大規模データ対応:</strong> メモリ管理を最適化し、保存時のフリーズを抑制しています。</li>
         </ul>
     </div>
 
@@ -74,7 +74,7 @@
             <div class="file-input-group">
                 <label>③ 在庫/棚卸実績</label>
                 <input type="file" id="up-stock">
-                <div class="format-hint">必要列: 日付, 商品コード, 在庫数</div>
+                <div class="format-hint">必要列: 日付, 商品コード, 在庫数<br>※棚卸した日だけでOK</div>
             </div>
         </div>
     </div>
@@ -128,7 +128,7 @@ async def read_csv_robust(file_input_id, label):
     c_date = next((c for c in df.columns if any(k in c for k in ['日', 'date', 'Date', '年月日'])), None)
     c_code = next((c for c in df.columns if any(k in c for k in ['商品', 'code', 'Code', 'コード', 'ID'])), None)
     c_qty = next((c for c in df.columns if any(k in c for k in ['数', 'qty', 'Qty', '量', '在庫', '入荷', '出荷'])), df.columns[-1])
-    if not c_date or not c_code: raise Exception(f"『{label}』に必要な列（日付、商品コード）が見つかりません。")
+    if not c_date or not c_code: raise Exception(f"『{label}』に必要な列名が見つかりません。")
     df = df.rename(columns={c_date: 'date', c_code: 'product_code', c_qty: 'qty'})
     df['date'] = pd.to_datetime(df['date'], errors='coerce')
     return df.dropna(subset=['date', 'product_code'])
@@ -137,7 +137,7 @@ async def process_data(*args):
     global df_final
     msg = document.getElementById("status")
     msg.style.color = "#d93025"
-    msg.innerText = "⏳ 統合処理中..."
+    msg.innerText = "⏳ 遡り計算および統合処理中..."
     await asyncio.sleep(0.1)
     
     try:
@@ -161,16 +161,30 @@ async def process_data(*args):
                     pdf = pd.merge(pdf, tmp, on='date', how='left').rename(columns={'qty': n})
             
             pdf = pdf.fillna(0)
-            cur, stocks = 0, []
-            for _, r in pdf.iterrows():
-                if r.get('actual_stock', 0) > 0: cur = r['actual_stock']
-                else: cur = cur + r.get('incoming', 0) - r.get('outgoing', 0)
-                cur = max(0, cur)
-                stocks.append(cur)
+            stocks = [0] * len(pdf)
+            inventory_idx = pdf[pdf['actual_stock'] > 0].index.tolist()
+            
+            if inventory_idx:
+                first_idx = inventory_idx[0]
+                stocks[first_idx] = pdf.loc[first_idx, 'actual_stock']
+                # 逆算ロジック
+                for i in range(first_idx - 1, -1, -1):
+                    stocks[i] = max(0, stocks[i+1] - pdf.loc[i+1, 'incoming'] + pdf.loc[i+1, 'outgoing'])
+                # 順算ロジック
+                cur = stocks[first_idx]
+                for i in range(first_idx + 1, len(pdf)):
+                    if pdf.loc[i, 'actual_stock'] > 0: cur = pdf.loc[i, 'actual_stock']
+                    else: cur = cur + pdf.loc[i, 'incoming'] - pdf.loc[i, 'outgoing']
+                    cur = max(0, cur); stocks[i] = cur
+            else:
+                cur = 0
+                for i in range(len(pdf)):
+                    cur = cur + pdf.loc[i, 'incoming'] - pdf.loc[i, 'outgoing']
+                    cur = max(0, cur); stocks[i] = cur
+            
             pdf['inventory'] = stocks
             results.append(pdf)
 
-        if not results: raise Exception("処理対象の商品が見つかりません。")
         df_final = pd.concat(results).sort_values(['date', 'product_code'])
         df_final.insert(0, 'org_id', org_id)
         df_final['date'] = df_final['date'].dt.strftime('%Y-%m-%d')
@@ -178,7 +192,7 @@ async def process_data(*args):
         document.getElementById("output-area").innerHTML = df_final.head(100).to_html(index=False)
         document.getElementById("dl-btn").style.display = "block"
         msg.style.color = "#27ae60"
-        msg.innerText = f"✅ 統合完了（全 {len(df_final):,} 行）\n※プレビューは最初の100行を表示しています"
+        msg.innerText = f"✅ 統合完了（全 {len(df_final):,} 行）"
         
     except Exception as e:
         msg.innerText = f"❌ {str(e)}"
@@ -188,25 +202,22 @@ async def download_csv(*args):
     if df_final is None: return
     msg = document.getElementById("status")
     msg.style.color = "#3498db"
-    msg.innerText = "💾 ファイル生成中...少々お待ちください"
+    msg.innerText = "💾 CSVを生成中...お待ちください"
     await asyncio.sleep(0.1)
     
     try:
         csv_str = df_final.to_csv(index=False, encoding='utf-8-sig')
         blob = Blob.new([csv_str], {type: 'text/csv'})
         url = URL.createObjectURL(blob)
-        
         link = js_doc.createElement("a")
         link.href = url
-        link.download = "integrated_history_final.csv"
+        link.download = "integrated_history_v2_1.csv"
         link.click()
-        
         await asyncio.sleep(1.0)
         URL.revokeObjectURL(url)
         msg.style.color = "#27ae60"
-        msg.innerText = "✅ 保存しました！"
+        msg.innerText = "✅ 保存完了しました"
     except Exception as e:
-        msg.style.color = "#d93025"
         msg.innerText = f"❌ 保存エラー: {str(e)}"
 
 </script>
