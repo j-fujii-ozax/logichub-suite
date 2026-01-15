@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>実績データ統合ツール v1.9 - LogicHub</title>
+    <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css" />
+    <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
+    <style>
+        :root { --primary: #2c3e50; --accent: #27ae60; --bg: #f4f7f6; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); padding: 20px; line-height: 1.6; }
+        .container { max-width: 1000px; margin: auto; background: white; padding: 40px; border-radius: 15px; box-shadow: 0 5px 20px rgba(0,0,0,0.1); }
+        
+        header { text-align: center; border-bottom: 2px solid #eee; margin-bottom: 30px; }
+        h1 { color: var(--primary); margin-bottom: 10px; }
+        
+        .guide-box { background: #e8f4fd; border-left: 5px solid #3498db; padding: 20px; border-radius: 8px; margin-bottom: 30px; font-size: 14px; }
+        .guide-box ul { margin: 10px 0 0 20px; padding: 0; }
+
+        .step-title { font-size: 18px; font-weight: bold; color: var(--primary); margin-bottom: 15px; display: flex; align-items: center; gap: 10px; }
+        .step-number { background: var(--primary); color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+
+        .card { background: #f8f9fa; border: 1px solid #ddd; padding: 25px; border-radius: 10px; margin-bottom: 25px; }
+        .file-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
+        
+        .file-input-group { background: white; padding: 15px; border-radius: 8px; border: 1px dashed #ccc; }
+        .file-input-group label { display: block; font-weight: bold; margin-bottom: 5px; color: #333; }
+        .format-hint { font-size: 11px; color: #666; background: #eee; padding: 5px; border-radius: 4px; margin-top: 8px; line-height: 1.4; }
+
+        .config-row { display: grid; grid-template-columns: 1fr 2fr; gap: 20px; align-items: center; margin-top: 10px; }
+        .input-field { padding: 10px; border-radius: 5px; border: 1px solid #ccc; width: 100%; box-sizing: border-box; }
+
+        .btn-exec { background: var(--accent); color: white; border: none; padding: 18px; border-radius: 10px; width: 100%; font-weight: bold; cursor: pointer; font-size: 18px; transition: 0.3s; }
+        .btn-exec:hover { background: #219150; transform: translateY(-2px); }
+        
+        #status { margin-top: 20px; font-weight: bold; text-align: center; white-space: pre-wrap; }
+        .preview-table-container { margin-top: 30px; border: 1px solid #eee; border-radius: 8px; overflow-x: auto; max-height: 300px; }
+        table { width: 100%; border-collapse: collapse; font-size: 11px; }
+        th { background: #34495e; color: white; padding: 10px; position: sticky; top: 0; }
+        td { border-bottom: 1px solid #eee; padding: 8px; text-align: center; }
+        .btn-dl { display: none; padding: 15px 30px; background: #3498db; color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; margin: 20px auto; }
+    </style>
+    <py-config>packages = ["pandas", "numpy"]</py-config>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1>📊 実績データ統合・在庫復元ツール v1.9</h1>
+        <p>ガイド完全復刻・フリーズ対策版</p>
+    </header>
+
+    <div class="guide-box">
+        <strong>💡 統合と在庫復元の仕組み</strong>
+        <ul>
+            <li><strong>在庫の復元:</strong> 棚卸実績がある日はその値を優先。ない日は「前日在庫 + 入荷 - 出荷」で算出。</li>
+            <li><strong>マイナス補正:</strong> 在庫が 0 未満になった場合は 0 へリセットします。</li>
+            <li><strong>大規模データ:</strong> 保存時に数秒フリーズする場合がありますが、ブラウザを閉じずにお待ちください。</li>
+        </ul>
+    </div>
+
+    <div class="step-title"><div class="step-number">1</div> ファイルの準備 (CSV)</div>
+    <div class="card">
+        <div class="file-grid">
+            <div class="file-input-group">
+                <label>① 入荷実績</label>
+                <input type="file" id="up-in">
+                <div class="format-hint">必要列: 日付, 商品コード, 入荷数</div>
+            </div>
+            <div class="file-input-group">
+                <label>② 出荷実績</label>
+                <input type="file" id="up-out">
+                <div class="format-hint">必要列: 日付, 商品コード, 出荷数</div>
+            </div>
+            <div class="file-input-group">
+                <label>③ 在庫/棚卸実績</label>
+                <input type="file" id="up-stock">
+                <div class="format-hint">必要列: 日付, 商品コード, 在庫数</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="step-title"><div class="step-number">2</div> 統合・出力設定</div>
+    <div class="card">
+        <div class="config-row">
+            <div><label>組織ID (org_id)</label></div>
+            <div><input type="text" id="org-id" class="input-field" placeholder="例: F010" value="F010"></div>
+        </div>
+        <div class="config-row">
+            <div><label>生成する期間</label></div>
+            <div style="display: flex; gap: 10px; align-items: center;">
+                <input type="date" id="date-from" class="input-field">
+                <span>〜</span>
+                <input type="date" id="date-to" class="input-field">
+            </div>
+        </div>
+    </div>
+
+    <button id="run-btn" class="btn-exec" py-click="process_data">⚡ データを統合・プレビュー生成</button>
+
+    <div id="status"></div>
+    <div id="output-area" class="preview-table-container"></div>
+    <div style="text-align: center;">
+        <button id="dl-btn" class="btn-dl" py-click="download_csv">📥 統合された実績CSVを保存</button>
+    </div>
+</div>
+
+<script type="py">
+import pandas as pd
+import io, asyncio
+from pyscript import document
+from js import Blob, URL, document as js_doc
+
+df_final = None
+
+async def read_csv_robust(file_input_id, label):
+    files = document.getElementById(file_input_id).files
+    if len(files) == 0: return pd.DataFrame()
+    array_buffer = await files.item(0).arrayBuffer()
+    raw_bytes = array_buffer.to_py().tobytes()
+    decoded_text = None
+    for enc in ['utf-8-sig', 'cp932', 'utf-8', 'euc-jp']:
+        try: decoded_text = raw_bytes.decode(enc); break
+        except: continue
+    if not decoded_text: raise Exception(f"『{label}』の文字コードを判別できません。")
+    sep = '\t' if '\t' in decoded_text[:500] else ','
+    df = pd.read_csv(io.StringIO(decoded_text), sep=sep)
+    df.columns = [str(c).strip().replace('\ufeff', '').strip('"').strip("'") for c in df.columns]
+    c_date = next((c for c in df.columns if any(k in c for k in ['日', 'date', 'Date', '年月日'])), None)
+    c_code = next((c for c in df.columns if any(k in c for k in ['商品', 'code', 'Code', 'コード', 'ID'])), None)
+    c_qty = next((c for c in df.columns if any(k in c for k in ['数', 'qty', 'Qty', '量', '在庫', '入荷', '出荷'])), df.columns[-1])
+    if not c_date or not c_code: raise Exception(f"『{label}』に必要な列（日付、商品コード）が見つかりません。")
+    df = df.rename(columns={c_date: 'date', c_code: 'product_code', c_qty: 'qty'})
+    df['date'] = pd.to_datetime(df['date'], errors='coerce')
+    return df.dropna(subset=['date', 'product_code'])
+
+async def process_data(*args):
+    global df_final
+    msg = document.getElementById("status")
+    msg.style.color = "#d93025"
+    msg.innerText = "⏳ 統合処理中..."
+    await asyncio.sleep(0.1)
+    
+    try:
+        org_id = document.getElementById("org-id").value
+        d_from, d_to = document.getElementById("date-from").value, document.getElementById("date-to").value
+        if not all([org_id, d_from, d_to]): msg.innerText = "⚠️ 組織IDと期間を入力してください"; return
+
+        df_in = await read_csv_robust("up-in", "入荷実績")
+        df_out = await read_csv_robust("up-out", "出荷実績")
+        df_inv = await read_csv_robust("up-stock", "在庫実績")
+
+        all_prods = pd.concat([d['product_code'] for d in [df_in, df_out, df_inv] if not d.empty]).unique()
+        date_range = pd.date_range(start=d_from, end=d_to)
+        
+        results = []
+        for p in all_prods:
+            pdf = pd.DataFrame({'date': date_range, 'product_code': p})
+            for d, n in zip([df_in, df_out, df_inv], ['incoming', 'outgoing', 'actual_stock']):
+                if not d.empty:
+                    tmp = d[d['product_code']==p].groupby('date')['qty'].sum().reset_index()
+                    pdf = pd.merge(pdf, tmp, on='date', how='left').rename(columns={'qty': n})
+            
+            pdf = pdf.fillna(0)
+            cur, stocks = 0, []
+            for _, r in pdf.iterrows():
+                if r.get('actual_stock', 0) > 0: cur = r['actual_stock']
+                else: cur = cur + r.get('incoming', 0) - r.get('outgoing', 0)
+                cur = max(0, cur)
+                stocks.append(cur)
+            pdf['inventory'] = stocks
+            results.append(pdf)
+
+        if not results: raise Exception("処理対象の商品が見つかりません。")
+        df_final = pd.concat(results).sort_values(['date', 'product_code'])
+        df_final.insert(0, 'org_id', org_id)
+        df_final['date'] = df_final['date'].dt.strftime('%Y-%m-%d')
+        
+        document.getElementById("output-area").innerHTML = df_final.head(100).to_html(index=False)
+        document.getElementById("dl-btn").style.display = "block"
+        msg.style.color = "#27ae60"
+        msg.innerText = f"✅ 統合完了（全 {len(df_final):,} 行）\n※プレビューは最初の100行を表示しています"
+        
+    except Exception as e:
+        msg.innerText = f"❌ {str(e)}"
+
+async def download_csv(*args):
+    global df_final
+    if df_final is None: return
+    msg = document.getElementById("status")
+    msg.style.color = "#3498db"
+    msg.innerText = "💾 ファイル生成中...少々お待ちください"
+    await asyncio.sleep(0.1)
+    
+    try:
+        csv_str = df_final.to_csv(index=False, encoding='utf-8-sig')
+        blob = Blob.new([csv_str], {type: 'text/csv'})
+        url = URL.createObjectURL(blob)
+        
+        link = js_doc.createElement("a")
+        link.href = url
+        link.download = "integrated_history_final.csv"
+        link.click()
+        
+        await asyncio.sleep(1.0)
+        URL.revokeObjectURL(url)
+        msg.style.color = "#27ae60"
+        msg.innerText = "✅ 保存しました！"
+    except Exception as e:
+        msg.style.color = "#d93025"
+        msg.innerText = f"❌ 保存エラー: {str(e)}"
+
+</script>
+</body>
+</html>
