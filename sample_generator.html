@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>入出荷実績データ生成ツール v1.1</title>
+    <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css" />
+    <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
+    <style>
+        :root { --primary: #007bff; --bg: #f4f7f6; }
+        body { font-family: "Helvetica Neue", Arial, sans-serif; background-color: var(--bg); color: #333; margin: 0; padding: 20px; }
+        .container { max-width: 1000px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: #444; margin-bottom: 30px; }
+        
+        /* Form Sections */
+        .form-section { margin-bottom: 25px; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; background: #fff; }
+        .form-section h3 { margin-top: 0; border-bottom: 2px solid var(--primary); padding-bottom: 10px; display: inline-block; }
+        
+        .row { display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 15px; }
+        .col { flex: 1; min-width: 200px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 0.9em; }
+        input[type="text"], input[type="date"], select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        
+        /* Product Table */
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.9em; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        .btn-sm { padding: 5px 10px; font-size: 0.8em; margin-left: 5px; cursor: pointer; }
+        .del-btn { background-color: #dc3545; color: white; border: none; border-radius: 4px; }
+        
+        /* Buttons */
+        .btn-area { text-align: center; margin-top: 30px; }
+        .btn { padding: 12px 30px; font-size: 16px; border: none; border-radius: 5px; cursor: pointer; transition: background 0.3s; font-weight: bold; }
+        .btn-primary { background-color: var(--primary); color: white; }
+        .btn-primary:hover { background-color: #0056b3; }
+        .btn-success { background-color: #28a745; color: white; display: none; }
+        .btn-success:hover { background-color: #218838; }
+        .btn-add { background-color: #17a2b8; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; margin-bottom: 10px; }
+
+        /* Loading & Output */
+        #loading { display: none; text-align: center; color: var(--primary); font-weight: bold; margin: 20px 0; }
+        #output-area { margin-top: 30px; overflow-x: auto; max-height: 400px; border: 1px solid #ccc; display: none; }
+        .error-msg { color: red; font-weight: bold; display: none; margin-bottom: 10px; }
+    </style>
+    <py-config>
+        packages = ["pandas", "numpy"]
+    </py-config>
+</head>
+<body>
+
+<div class="container">
+    <h1>📦 入出荷実績データ生成ツール</h1>
+
+    <div id="error-box" class="error-msg"></div>
+
+    <div class="form-section">
+        <h3>1. 基本設定</h3>
+        <div class="row">
+            <div class="col">
+                <label>組織ID (org_id)</label>
+                <input type="text" id="org_id" value="ORG001" placeholder="例: ORG001">
+            </div>
+            <div class="col">
+                <label>期間開始 (From)</label>
+                <input type="date" id="date_from">
+            </div>
+            <div class="col">
+                <label>期間終了 (To)</label>
+                <input type="date" id="date_to">
+            </div>
+        </div>
+        <div style="font-size: 0.85em; color: #666;">※期間は3ヶ月～3年の間で設定してください。</div>
+    </div>
+
+    <div class="form-section">
+        <h3>2. 商品設定 (最大20件)</h3>
+        <button class="btn-add" id="add-product-btn">+ 商品を追加</button>
+        <table id="product-table">
+            <thead>
+                <tr>
+                    <th>商品コード</th>
+                    <th>商品名称</th>
+                    <th>頻度 (在庫変動)</th>
+                    <th>波 (推移特性)</th>
+                    <th>休日 (土日停止)</th>
+                    <th>削除</th>
+                </tr>
+            </thead>
+            <tbody id="product-list">
+                </tbody>
+        </table>
+    </div>
+
+    <div class="btn-area">
+        <button id="generate-btn" class="btn btn-primary" py-click="generate_data">サンプル実績CSVを作成</button>
+        <br><br>
+        <button id="download-btn" class="btn btn-success" py-click="download_csv">📥 CSVをダウンロード</button>
+    </div>
+
+    <div id="loading">データ生成中...少々お待ちください...</div>
+    <div id="output-area"></div>
+</div>
+
+<script>
+    // Initial Setup
+    document.addEventListener('DOMContentLoaded', () => {
+        const today = new Date();
+        const threeMonthsAgo = new Date();
+        threeMonthsAgo.setMonth(today.getMonth() - 3);
+        
+        document.getElementById('date_to').valueAsDate = today;
+        document.getElementById('date_from').valueAsDate = threeMonthsAgo;
+
+        // Add one default row
+        addProductRow('P001', 'サンプル商品A');
+    });
+
+    document.getElementById('add-product-btn').addEventListener('click', () => {
+        const count = document.getElementById('product-list').rows.length;
+        if (count >= 20) {
+            alert('商品は最大20件までです。');
+            return;
+        }
+        const nextId = count + 1;
+        const code = 'P' + String(nextId).padStart(3, '0');
+        addProductRow(code, '商品' + String.fromCharCode(65 + count));
+    });
+
+    function addProductRow(code, name) {
+        const tbody = document.getElementById('product-list');
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td><input type="text" class="p-code" value="${code}"></td>
+            <td><input type="text" class="p-name" value="${name}"></td>
+            <td>
+                <select class="p-freq">
+                    <option value="high">高 (毎日動く)</option>
+                    <option value="medium" selected>中 (週2-3回)</option>
+                    <option value="low">低 (週1回程度)</option>
+                    <option value="very_low">超低 (月1回程度)</option>
+                </select>
+            </td>
+            <td>
+                <select class="p-wave">
+                    <option value="smooth" selected>穏やか (一定)</option>
+                    <option value="spiky">スパイク (特需あり)</option>
+                </select>
+            </td>
+            <td style="text-align:center;">
+                <input type="checkbox" class="p-holiday" checked>
+            </td>
+            <td style="text-align:center;">
+                <button class="del-btn btn-sm" onclick="this.closest('tr').remove()">削除</button>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    }
+</script>
+
+<script type="py">
+import pandas as pd
+import numpy as np
+import random
+from datetime import datetime, timedelta
+from js import document, console, URL, Blob, confirm, alert
+
+df_result = None
+
+def get_products():
+    products = []
+    rows = document.getElementById("product-list").rows
+    for row in rows:
+        code = row.querySelector(".p-code").value
+        name = row.querySelector(".p-name").value
+        freq = row.querySelector(".p-freq").value
+        wave = row.querySelector(".p-wave").value
+        holiday = row.querySelector(".p-holiday").checked
+        
+        if code and name:
+            products.append({
+                "code": code,
+                "name": name,
+                "freq": freq,
+                "wave": wave,
+                "holiday": holiday
+            })
+    return products
+
+def generate_data(*args):
+    global df_result
+    
+    # UI Reset
+    document.getElementById("error-box").style.display = "none"
+    document.getElementById("output-area").style.display = "none"
+    document.getElementById("download-btn").style.display = "none"
+    document.getElementById("loading").style.display = "block"
+
+    # Inputs
+    org_id = document.getElementById("org_id").value
+    date_from_str = document.getElementById("date_from").value
+    date_to_str = document.getElementById("date_to").value
+    
+    # Validation
+    if not org_id:
+        show_error("組織IDを入力してください。")
+        return
+    
+    try:
+        d_from = datetime.strptime(date_from_str, '%Y-%m-%d')
+        d_to = datetime.strptime(date_to_str, '%Y-%m-%d')
+        
+        diff_days = (d_to - d_from).days
+        if diff_days < 90:
+            show_error("期間は最低3ヶ月以上に設定してください。")
+            return
+        if diff_days > 365 * 3:
+            show_error("期間は最大3年以内に設定してください。")
+            return
+    except:
+        show_error("日付を正しく設定してください。")
+        return
+
+    products = get_products()
+    if len(products) == 0:
+        show_error("商品を少なくとも1つ追加してください。")
+        return
+
+    # Logic
+    date_range = pd.date_range(start=date_from_str, end=date_to_str, freq='D')
+    all_data = []
+
+    for p in products:
+        # Initial Inventory
+        inventory = random.randint(100, 500)
+        reorder_point = 100
+        order_qty = 300
+        
+        # Probabilities setup
+        if p['freq'] == 'high':
+            p_move = 0.9
+        elif p['freq'] == 'medium':
+            p_move = 0.4
+        elif p['freq'] == 'low':
+            p_move = 0.14  # Approx once a week
+        elif p['freq'] == 'very_low':
+            p_move = 0.033 # Approx once a month (1/30)
+        else:
+            p_move = 0.1
+        
+        # Base demand size
+        base_demand = 20 if p['freq'] == 'high' else 50
+        
+        for d in date_range:
+            is_weekend = d.weekday() >= 5 # 5=Sat, 6=Sun
+            
+            incoming = 0
+            outgoing = 0
+            
+            # Holiday Check
+            if p['holiday'] and is_weekend:
+                # No movement
+                pass
+            else:
+                # Outgoing Logic
+                if random.random() < p_move:
+                    if p['wave'] == 'smooth':
+                        # Normal distribution
+                        qty = int(np.random.normal(base_demand, base_demand * 0.2))
+                    else: # spiky
+                        # Occasional spike
+                        if random.random() < 0.05: # 5% chance of spike
+                            qty = int(base_demand * random.uniform(3, 6))
+                        else:
+                            qty = int(np.random.normal(base_demand, base_demand * 0.2))
+                    
+                    outgoing = max(0, qty)
+                    # Cap outgoing by inventory (cannot ship what you don't have)
+                    if outgoing > inventory:
+                        outgoing = inventory
+
+                # Update Inventory (Outgoing)
+                inventory -= outgoing
+                
+                # Incoming Logic (Restock)
+                if inventory < reorder_point:
+                    incoming = order_qty
+                    inventory += incoming
+
+            all_data.append({
+                "org_id": org_id,
+                "date": d.strftime('%Y/%m/%d'),
+                "product_code": p['code'],
+                "product_name": p['name'],
+                "inventory": inventory,
+                "incoming_quantity": incoming,
+                "outgoing_quantity": outgoing
+            })
+
+    # Create DataFrame
+    df = pd.DataFrame(all_data)
+    df_result = df # Store globally
+    
+    # Render Preview
+    output_div = document.getElementById("output-area")
+    # Simple HTML table conversion
+    preview_html = df.head(50).to_html(index=False, classes="preview-table")
+    output_div.innerHTML = f"<h3>プレビュー (最初の50件) / 全 {len(df)} 件</h3>" + preview_html
+    
+    document.getElementById("loading").style.display = "none"
+    output_div.style.display = "block"
+    document.getElementById("download-btn").style.display = "inline-block"
+
+def show_error(msg):
+    box = document.getElementById("error-box")
+    box.innerText = msg
+    box.style.display = "block"
+    document.getElementById("loading").style.display = "none"
+
+def download_csv(*args):
+    if df_result is None:
+        return
+    
+    csv_content = df_result.to_csv(index=False)
+    blob = Blob.new([csv_content], {type: "text/csv;charset=utf-8;"})
+    url = URL.createObjectURL(blob)
+    
+    hidden_link = document.createElement("a")
+    hidden_link.href = url
+    hidden_link.download = "inventory_sample_data.csv"
+    hidden_link.click()
+
+</script>
+
+</body>
+</html>
