@@ -2,109 +2,141 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>LogicHub - サプライチェーン最適化ポータル</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LogicHub Suite - Integrated Business Portal</title>
     <style>
-        :root { --primary: #1a73e8; --secondary: #673ab7; --accent: #e67e22; --success: #27ae60; --bg: #f8f9fa; --text: #202124; }
-        body { font-family: 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 0; line-height: 1.5; }
+        :root {
+            --primary: #2c3e50; --accent: #3498db; --bg: #f4f7f6; --text: #333;
+            --cat-data: #27ae60; --cat-analyze: #9b59b6; --cat-plan: #e67e22;
+        }
+        body { font-family: 'Segoe UI', "Helvetica Neue", Arial, sans-serif; background-color: var(--bg); color: var(--text); margin: 0; padding: 0; }
+        header { background: var(--primary); color: white; padding: 40px 20px; text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .container { max-width: 1200px; margin: 20px auto; padding: 20px; }
         
-        .hero { background: linear-gradient(135deg, var(--primary), var(--secondary)); color: white; padding: 80px 20px; text-align: center; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
-        .hero h1 { margin: 0; font-size: 42px; letter-spacing: 2px; }
-        .hero p { opacity: 0.9; font-size: 18px; margin-top: 15px; font-weight: 300; }
-
-        .container { max-width: 1200px; margin: 40px auto 80px; padding: 0 20px; }
+        .category-section { margin-bottom: 50px; }
+        .category-title { 
+            font-size: 22px; font-weight: bold; margin-bottom: 25px; padding-left: 15px;
+            border-left: 6px solid #ccc; display: flex; align-items: baseline; gap: 12px;
+        }
+        .category-title span { font-size: 14px; color: #7f8c8d; font-weight: normal; }
         
-        .section-title { margin: 60px 0 25px; font-size: 22px; border-left: 6px solid var(--primary); padding-left: 18px; color: #1a1a1a; font-weight: bold; }
+        .tool-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 25px; }
+        .tool-card {
+            background: white; border-radius: 12px; padding: 25px; text-decoration: none; color: inherit;
+            display: flex; flex-direction: column; transition: all 0.3s ease; border: 1px solid #eee; position: relative;
+        }
+        .tool-card:hover { transform: translateY(-5px); box-shadow: 0 12px 30px rgba(0,0,0,0.1); border-color: var(--accent); }
+        
+        /* Category Border Accents */
+        .cat-data { border-top: 5px solid var(--cat-data); }
+        .cat-analyze { border-top: 5px solid var(--cat-analyze); }
+        .cat-plan { border-top: 5px solid var(--cat-plan); }
 
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 30px; }
-        .card { background: white; border-radius: 16px; padding: 35px; box-shadow: 0 10px 30px rgba(0,0,0,0.04); transition: 0.3s; display: flex; flex-direction: column; border: 1px solid #eee; position: relative; }
-        .card:hover { transform: translateY(-8px); box-shadow: 0 15px 40px rgba(0,0,0,0.1); border-color: var(--primary); }
-
-        .tag { position: absolute; top: 20px; right: 20px; font-size: 12px; padding: 5px 12px; border-radius: 20px; font-weight: bold; }
-        .tag-active { background: #e6f4ea; color: #1e8e3e; border: 1px solid #c2e7cc; }
-        .tag-next { background: #feefc3; color: #f29900; border: 1px solid #ffe7a0; }
-
-        .icon { font-size: 48px; margin-bottom: 25px; }
-        .title { font-size: 20px; font-weight: bold; margin-bottom: 12px; color: #1a1a1a; }
-        .desc { font-size: 15px; color: #5f6368; line-height: 1.6; flex-grow: 1; margin-bottom: 30px; }
-
-        .btn { text-decoration: none; text-align: center; padding: 14px; border-radius: 10px; font-weight: bold; transition: 0.2s; font-size: 15px; }
-        .btn-active { background: var(--primary); color: white; box-shadow: 0 4px 10px rgba(26,115,232,0.2); }
-        .btn-active:hover { background: #174ea6; }
-        .btn-locked { background: #f1f3f4; color: #9aa0a6; pointer-events: none; }
-
-        footer { text-align: center; padding: 60px; color: #9aa0a6; font-size: 14px; border-top: 1px solid #eee; }
+        .icon { font-size: 32px; margin-bottom: 12px; }
+        .tool-card h3 { margin: 0 0 4px; font-size: 18px; color: var(--primary); }
+        .en-title { font-size: 11px; color: var(--accent); font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; }
+        .tool-card p { font-size: 13.5px; color: #666; line-height: 1.6; margin-bottom: 20px; flex-grow: 1; }
+        
+        .file-tag { font-family: 'Consolas', monospace; font-size: 11px; color: #95a5a6; border-top: 1px solid #f0f0f0; pt: 10px; margin-top: auto; }
+        
+        footer { text-align: center; padding: 50px; color: #999; font-size: 12px; border-top: 1px solid #ddd; }
     </style>
 </head>
 <body>
 
-<div class="hero">
-    <h1>📦 LogicHub</h1>
-    <p>需要予測を「実運用可能な計画」へ。サプライチェーン最適化ツール・スイート</p>
-</div>
+<header>
+    <h1>LogicHub Suite</h1>
+    <p>Data-Driven SCM & Logistics Optimizer</p>
+</header>
 
 <div class="container">
-
-    <h2 class="section-title">Planning & Production（計画・生産管理）</h2>
-    <div class="grid">
-        <div class="card">
-            <span class="tag tag-active">NEW 稼働中</span>
-            <div class="icon">🏭</div>
-            <div class="title">Production Scheduler</div>
-            <div class="desc">発注予測を着工予定に変換。ライン別の生産上限（キャパシティ）に基づき、商品を自動割り当てして平準化します。</div>
-            <a href="production_scheduler.html" class="btn btn-active">ツールを起動</a>
-        </div>
-
-        <div class="card">
-            <span class="tag tag-active">稼働中</span>
-            <div class="icon">⚖️</div>
-            <div class="title">Smart Order Optimizer</div>
-            <div class="desc">予測データにMOQ・結束単位・休日シフトを適用。現場制約をクリアした「そのまま送れる」発注案を作成します。</div>
-            <a href="order_logic.html" class="btn btn-active">ツールを起動</a>
-        </div>
-    </div>
-
-    <h2 class="section-title">Analysis & Visibility（分析・可視化）</h2>
-    <div class="grid">
-        <div class="card">
-            <span class="tag tag-active">稼働中</span>
-            <div class="icon">📊</div>
-            <div class="title">Time-Bucket Aggregator</div>
-            <div class="desc">日次データを週次・月次のカレンダー形式へ変換。拠点・商品別の需要波動を時系列順に可視化します。</div>
-            <a href="time_bucket.html" class="btn btn-active">ツールを起動</a>
-        </div>
-
-        <div class="card">
-            <span class="tag tag-next">Coming Soon</span>
-            <div class="icon">🚚</div>
-            <div class="title">Truck Load Simulator</div>
-            <div class="desc">発注/生産予定の重量・才数からトラックの積載率を計算。配車効率と運賃コストを最適化します。</div>
-            <span class="btn btn-locked">設計中</span>
+    
+    <div class="category-section">
+        <div class="category-title" style="border-color: var(--cat-data);">🗂️ データ基盤・加工 <span>Data Infrastructure</span></div>
+        <div class="tool-grid">
+            <a href="data_integrator.html" class="tool-card cat-data">
+                <div class="icon">🔄</div>
+                <h3>実績データ統合・在庫復元</h3>
+                <div class="en-title">Inventory Data Integrator</div>
+                <p>入出荷・棚卸履歴を統合し、在庫推移を逆算復元します。</p>
+                <div class="file-tag">data_integrator.html</div>
+            </a>
+            <a href="column_shuffler.html" class="tool-card cat-data">
+                <div class="icon">🔀</div>
+                <h3>列名マッピング・変換</h3>
+                <div class="en-title">Column Mapper & Shuffler</div>
+                <p>CSVの列構成を標準フォーマットに変換・整理します。</p>
+                <div class="file-tag">column_shuffler.html</div>
+            </a>
+            <a href="sample_generator.html" class="tool-card cat-data">
+                <div class="icon">🧪</div>
+                <h3>サンプルデータ生成</h3>
+                <div class="en-title">Sample Data Generator</div>
+                <p>シミュレーション用のテスト実績データを自動作成します。</p>
+                <div class="file-tag">sample_generator.html</div>
+            </a>
         </div>
     </div>
 
-    <h2 class="section-title">Data Utility（データ整形・加工）</h2>
-    <div class="grid">
-        <div class="card">
-            <span class="tag tag-active">稼働中</span>
-            <div class="icon">🔄</div>
-            <div class="title">Column Shuffler</div>
-            <div class="desc">CSVの並び替え・列名変更・不要列の削除をブラウザで実行。システム間の取込用変換を自動化します。</div>
-            <a href="column_shuffler.html" class="btn btn-active">ツールを起動</a>
-        </div>
-
-        <div class="card">
-            <span class="tag tag-next">Coming Soon</span>
-            <div class="icon">🔗</div>
-            <div class="title">Master Joiner</div>
-            <div class="desc">コードだけのデータに名称や単価などのマスタ情報を自動結合。ExcelのVLOOKUP作業を撲滅します。</div>
-            <span class="btn btn-locked">開発中</span>
+    <div class="category-section">
+        <div class="category-title" style="border-color: var(--cat-analyze);">📈 分析・需要予測 <span>Analysis & Forecasting</span></div>
+        <div class="tool-grid">
+            <a href="time_bucket.html" class="tool-card cat-analyze">
+                <div class="icon">📅</div>
+                <h3>タイムバケット集計</h3>
+                <div class="en-title">Time Bucket Aggregator</div>
+                <p>実績を週次・月次等の任意の時間枠で集計します。</p>
+                <div class="file-tag">time_bucket.html</div>
+            </a>
+            <a href="seasonal_adjuster.html" class="tool-card cat-analyze">
+                <div class="icon">🌊</div>
+                <h3>季節性・トレンド分析</h3>
+                <div class="en-title">Seasonal Trend Adjuster</div>
+                <p>需要の波を指数化し、将来の需要予測を可視化します。</p>
+                <div class="file-tag">seasonal_adjuster.html</div>
+            </a>
+            <a href="order_logic.html" class="tool-card cat-analyze">
+                <div class="icon">🛒</div>
+                <h3>発注ロジック計算</h3>
+                <div class="en-title">Order Logic Optimizer</div>
+                <p>安全在庫とリードタイムから最適な発注点を算出します。</p>
+                <div class="file-tag">order_logic.html</div>
+            </a>
         </div>
     </div>
 
-    <footer>
-        &copy; 2026 Supply Chain Optimization Project / LogicHub Operations.
-    </footer>
+    <div class="category-section">
+        <div class="category-title" style="border-color: var(--cat-plan);">🏗️ 計画・シミュレーション <span>Planning & Simulation</span></div>
+        <div class="tool-grid">
+            <a href="manufacturing_simulator.html" class="tool-card cat-plan">
+                <div class="icon">🛠️</div>
+                <h3>製造可能数シミュレーター</h3>
+                <div class="en-title">Manufacturing Capacity Simulator</div>
+                <p>BOMと部品在庫から製品の生産可能数をリアルタイム計算します。</p>
+                <div class="file-tag">manufacturing_simulator.html</div>
+            </a>
+            <a href="production_scheduler.html" class="tool-card cat-plan">
+                <div class="icon">🗓️</div>
+                <h3>生産スケジューラ</h3>
+                <div class="en-title">Production Scheduler</div>
+                <p>能力と納期に基づいた生産順序をシミュレートします。</p>
+                <div class="file-tag">production_scheduler.html</div>
+            </a>
+            <a href="truck_simulator.html" class="tool-card cat-plan">
+                <div class="icon">🚚</div>
+                <h3>配車・積載シミュレーター</h3>
+                <div class="en-title">Truck Loading Simulator</div>
+                <p>物量に応じた必要車両台数と積載率を最適化します。</p>
+                <div class="file-tag">truck_simulator.html</div>
+            </a>
+        </div>
+    </div>
+
 </div>
+
+<footer>
+    &copy; 2026 LogicHub Suite - Data Engineering for Supply Chain
+</footer>
 
 </body>
 </html>

@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>製造可能数シミュレーター v3.2 - LogicHub</title>
+    <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css" />
+    <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
+    <style>
+        :root { --primary: #2c3e50; --accent: #e67e22; --bg: #f4f7f6; --danger: #e74c3c; --success: #27ae60; --link: #3498db; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); padding: 20px; line-height: 1.6; color: #333; }
+        .container { max-width: 1100px; margin: auto; background: white; padding: 40px; border-radius: 15px; box-shadow: 0 5px 25px rgba(0,0,0,0.15); }
+        
+        header { text-align: center; border-bottom: 2px solid #eee; margin-bottom: 30px; }
+        h1 { color: var(--primary); margin: 0; font-size: 28px; }
+        
+        .guide-box { background: #e8f4fd; border-left: 5px solid var(--link); padding: 20px; border-radius: 8px; margin-bottom: 30px; font-size: 14px; }
+        .guide-box ul { margin: 10px 0 0 20px; padding: 0; }
+        
+        .step-title { font-size: 19px; font-weight: bold; color: var(--primary); margin-bottom: 15px; display: flex; align-items: center; gap: 10px; }
+        .step-number { background: var(--primary); color: white; width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 15px; }
+        
+        .card { background: #f8f9fa; border: 1px solid #ddd; padding: 25px; border-radius: 10px; margin-bottom: 30px; }
+        .file-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        
+        .file-input-group { background: white; padding: 15px; border-radius: 8px; border: 1px dashed #ccc; }
+        .format-hint { font-size: 11px; color: #666; background: #eee; padding: 5px; border-radius: 4px; margin-top: 8px; line-height: 1.4; }
+
+        .table-container { border: 1px solid #ddd; border-radius: 8px; overflow: hidden; background: white; margin-bottom: 20px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th { background: #34495e; color: white; padding: 12px; text-align: left; position: sticky; top: 0; }
+        td { border-bottom: 1px solid #eee; padding: 12px; }
+        
+        .input-qty { width: 100px; padding: 8px; border: 2px solid var(--accent); border-radius: 5px; text-align: center; font-size: 18px; font-weight: bold; background: #fffdfa; }
+        .priority-row { background: #fff4e5 !important; border-left: 5px solid var(--accent); }
+        .prio-chk { transform: scale(1.5); cursor: pointer; }
+        
+        .status-badge { padding: 6px 12px; border-radius: 6px; font-weight: bold; font-size: 12px; text-align: center; display: inline-block; min-width: 60px; border: 1px solid transparent; }
+        .status-ok { background: #e6f4ea; color: #137333; border-color: #137333; }
+        .status-ng { background: #fce8e6; color: #d93025; border-color: #d93025; }
+
+        .btn-main { background: var(--primary); color: white; border: none; padding: 18px; border-radius: 10px; width: 100%; font-weight: bold; cursor: pointer; font-size: 18px; margin-top: 10px; }
+        .btn-dl { background: var(--link); color: white; border: none; padding: 12px 30px; border-radius: 8px; font-weight: bold; cursor: pointer; margin-top: 20px; display: inline-block; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <h1>🛠️ 製造可能数シミュレーター v3.2</h1>
+        <p>デザイン復刻・安定稼働エンジン版</p>
+    </header>
+
+    <div class="guide-box">
+        <strong>⚙️ シミュレーションの仕組み</strong>
+        <ul>
+            <li><strong>動的更新:</strong> 計画数を変えると、下の部品残量と他製品の判定がリアルタイムに連動します。</li>
+            <li><strong>優先順位:</strong> チェックを入れた製品から順に在庫を確保します。順序を整理するには「並び替え確定」を押してください。</li>
+            <li><strong>逆転計算:</strong> 上の製品（優先品）の計画数を減らすと、下の製品が自動的に「充足」へ変わります。</li>
+        </ul>
+    </div>
+
+    <div class="step-title"><div class="step-number">1</div> データの読み込み</div>
+    <div class="card">
+        <div class="file-grid">
+            <div class="file-input-group">
+                <label style="font-weight:bold;">部品構成表 (BOM)</label>
+                <input type="file" id="up-bom">
+                <div class="format-hint">必要列: 親製品コード, 子部品コード, 必要数</div>
+            </div>
+            <div class="file-input-group">
+                <label style="font-weight:bold;">部品在庫データ</label>
+                <input type="file" id="up-stock">
+                <div class="format-hint">必要列: 部品コード, 在庫数</div>
+            </div>
+        </div>
+        <button id="run-btn" class="btn-main" onclick="initSimulation()">⚡ 解析とシミュレーションを開始</button>
+    </div>
+
+    <div id="status-msg" style="text-align: center; font-weight: bold; margin: 20px; color: var(--danger);"></div>
+
+    <div id="result-area" style="display:none;">
+        <div class="step-title"><div class="step-number">2</div> 生産計画のリアルタイム調整</div>
+        <button class="btn-main" style="width:auto; padding:10px 25px; background:var(--accent); font-size:14px; margin-bottom:15px;" onclick="renderAll()">🔄 優先順で並び替えを確定</button>
+        
+        <div class="table-container" style="max-height: 450px; overflow-y: auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 70px; text-align: center;">優先</th>
+                        <th>製品コード</th>
+                        <th>単独最大</th>
+                        <th style="width: 140px;">計画数</th>
+                        <th>充足判定</th>
+                    </tr>
+                </thead>
+                <tbody id="prod-body"></tbody>
+            </table>
+        </div>
+
+        <div class="step-title" style="margin-top:40px;"><div class="step-number">3</div> 部品在庫への影響予測</div>
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>部品コード</th>
+                        <th>初期在庫</th>
+                        <th>計画消費量</th>
+                        <th>残り在庫予測</th>
+                        <th>在庫判定</th>
+                    </tr>
+                </thead>
+                <tbody id="comp-body"></tbody>
+            </table>
+        </div>
+        <div style="text-align: center; margin-bottom: 40px;">
+            <button id="dl-btn" class="btn-dl" onclick="downloadCSV()">📥 シミュレーション結果を保存 (CSV)</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    let bomData = [];
+    let stockMap = {};
+    let plans = {};
+
+    async function initSimulation() {
+        const msg = document.getElementById('status-msg');
+        msg.innerText = "⏳ 解析中...";
+        try {
+            const bomFile = document.getElementById('up-bom').files[0];
+            const stockFile = document.getElementById('up-stock').files[0];
+            if (!bomFile || !stockFile) throw new Error("ファイルを選択してください。");
+
+            bomData = parseCSV(await readAsText(bomFile));
+            const rawStock = parseCSV(await readAsText(stockFile));
+            
+            stockMap = {};
+            rawStock.forEach(row => {
+                const vals = Object.values(row);
+                if (vals.length >= 2) stockMap[vals[0]] = parseInt(vals[1]) || 0;
+            });
+
+            const parents = [...new Set(bomData.map(d => Object.values(d)[0]))];
+            plans = {};
+            parents.forEach(p => {
+                const recipe = bomData.filter(d => Object.values(d)[0] === p);
+                let maxCan = Infinity;
+                recipe.forEach(r => {
+                    const vals = Object.values(r);
+                    const can = Math.floor((stockMap[vals[1]] || 0) / (parseInt(vals[2]) || 1));
+                    if (can < maxCan) maxCan = can;
+                });
+                plans[p] = { qty: maxCan === Infinity ? 0 : maxCan, prio: false, s_max: maxCan };
+            });
+
+            document.getElementById('result-area').style.display = 'block';
+            msg.innerText = "";
+            renderAll();
+        } catch (e) {
+            msg.innerText = "❌ 解析エラー: " + e.message;
+        }
+    }
+
+    function readAsText(file) {
+        return new Promise(res => {
+            const r = new FileReader();
+            r.onload = () => res(r.result);
+            r.readAsText(file);
+        });
+    }
+
+    function parseCSV(text) {
+        const lines = text.trim().split(/\r?\n/);
+        const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+        return lines.slice(1).map(line => {
+            const values = line.split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+            const obj = {};
+            headers.forEach((h, i) => obj[h] = values[i]);
+            return obj;
+        });
+    }
+
+    function renderAll() {
+        const sorted = Object.keys(plans).sort((a, b) => (plans[b].prio - plans[a].prio) || a.localeCompare(b));
+        const tbodyP = document.getElementById('prod-body');
+        tbodyP.innerHTML = "";
+        sorted.forEach(p => {
+            const it = plans[p];
+            const tr = document.createElement('tr');
+            if (it.prio) tr.className = "priority-row";
+            tr.innerHTML = `
+                <td style="text-align:center;"><input type="checkbox" class="prio-chk" onchange="plans['${p}'].prio=this.checked" ${it.prio ? 'checked' : ''}></td>
+                <td><strong>${p}</strong></td><td>${it.s_max}</td>
+                <td><input type="number" class="input-qty" value="${it.qty}" oninput="plans['${p}'].qty=parseInt(this.value)||0; calculate()"></td>
+                <td><span class="status-badge" id="badge-${p}">-</span></td>`;
+            tbodyP.appendChild(tr);
+        });
+
+        const tbodyC = document.getElementById('comp-body');
+        tbodyC.innerHTML = "";
+        Object.keys(stockMap).forEach(c => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `<td>${c}</td><td>${stockMap[c]}</td><td id="used-${c}">0</td><td id="rem-${c}">0</td><td><span class="status-badge" id="cbadge-${c}">-</span></td>`;
+            tbodyC.appendChild(tr);
+        });
+        calculate();
+    }
+
+    function calculate() {
+        const sorted = Object.keys(plans).sort((a, b) => (plans[b].prio - plans[a].prio) || a.localeCompare(b));
+        const currentStock = { ...stockMap };
+        const usage = {};
+        Object.keys(stockMap).forEach(c => usage[c] = 0);
+
+        sorted.forEach(p => {
+            const recipe = bomData.filter(d => Object.values(d)[0] === p);
+            let ok = true;
+            recipe.forEach(r => {
+                const vals = Object.values(r);
+                if ((currentStock[vals[1]] || 0) < (parseInt(vals[2]) * plans[p].qty)) ok = false;
+            });
+            const b = document.getElementById(`badge-${p}`);
+            if (b) { b.innerText = ok ? "充足" : "不足"; b.className = `status-badge ${ok ? 'status-ok' : 'status-ng'}`; }
+            recipe.forEach(r => {
+                const vals = Object.values(r);
+                const used = (parseInt(vals[2]) || 0) * plans[p].qty;
+                usage[vals[1]] = (usage[vals[1]] || 0) + used;
+                currentStock[vals[1]] -= used;
+            });
+        });
+
+        Object.keys(stockMap).forEach(c => {
+            const rem = stockMap[c] - usage[c];
+            const uEl = document.getElementById(`used-${c}`), rEl = document.getElementById(`rem-${c}`), bEl = document.getElementById(`cbadge-${c}`);
+            if (uEl) uEl.innerText = usage[c];
+            if (rEl) { rEl.innerText = rem; rEl.style.color = rem < 0 ? 'var(--danger)' : 'var(--success)'; }
+            if (bEl) { bEl.innerText = rem >= 0 ? "OK" : "欠品"; bEl.className = `status-badge ${rem >= 0 ? 'status-ok' : 'status-ng'}`; }
+        });
+    }
+
+    function downloadCSV() {
+        let csv = "製品コード,優先,計画数\n";
+        Object.keys(plans).forEach(p => csv += `${p},${plans[p].prio},${plans[p].qty}\n`);
+        const b = new Blob([csv], { type: 'text/csv' }), url = URL.createObjectURL(b), a = document.createElement('a');
+        a.href = url; a.download = 'production_plan.csv'; a.click();
+    }
+</script>
+</body>
+</html>

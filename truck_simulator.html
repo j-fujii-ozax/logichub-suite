@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>Truck Load Simulator v1.0 - LogicHub</title>
+    <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css" />
+    <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
+    <py-config>packages = ["pandas", "numpy"]</py-config>
+    <style>
+        :root { --primary: #2c3e50; --truck-bg: #ecf0f1; --truck-fill: #3498db; --bg: #f4f7f6; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); margin: 0; padding: 0; }
+        
+        #loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.9); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 9999; }
+        .spinner { width: 50px; height: 50px; border: 5px solid #ddd; border-top: 5px solid var(--truck-fill); border-radius: 50%; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        .container { max-width: 1200px; margin: 40px auto; background: white; padding: 40px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); position: relative; }
+        .home-btn { position: absolute; top: 30px; left: 40px; text-decoration: none; color: #5f6368; font-weight: bold; border: 1px solid #ddd; padding: 8px 15px; border-radius: 8px; background: white; }
+        
+        header { text-align: center; border-bottom: 2px solid #eee; padding-bottom: 20px; margin-bottom: 30px; }
+        h1 { color: var(--primary); font-size: 26px; }
+
+        .setup-card { background: #f8f9fa; border: 1px solid #dadce0; border-radius: 12px; padding: 25px; margin-bottom: 30px; display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 20px; align-items: end; }
+        label { display: block; font-weight: bold; font-size: 14px; color: #34495e; margin-bottom: 8px; }
+        input, select { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; }
+
+        .btn-exec { background: var(--truck-fill); color: white; border: none; padding: 15px; border-radius: 8px; font-weight: bold; cursor: pointer; font-size: 16px; transition: 0.3s; }
+        .btn-exec:hover { background: #2980b9; transform: translateY(-2px); }
+
+        /* トラック表示スタイル */
+        .truck-container { border: 1px solid #ccc; border-radius: 12px; margin-bottom: 30px; background: #fff; overflow: hidden; }
+        .truck-header { background: #34495e; color: white; padding: 12px 20px; font-weight: bold; display: flex; justify-content: space-between; }
+        .truck-body { padding: 20px; display: flex; align-items: center; gap: 20px; }
+        
+        .truck-visual { flex-grow: 1; height: 40px; background: var(--truck-bg); border-radius: 20px; position: relative; overflow: hidden; border: 2px solid #bdc3c7; }
+        .truck-fill-bar { height: 100%; background: var(--truck-fill); transition: width 0.5s ease-out; }
+        .truck-label { position: absolute; width: 100%; text-align: center; top: 8px; font-weight: bold; font-size: 14px; color: #2c3e50; }
+
+        .stats-badge { padding: 5px 15px; border-radius: 20px; font-size: 12px; font-weight: bold; }
+        .full { background: #e6f4ea; color: #137333; }
+        .empty { background: #fce8e6; color: #d93025; }
+
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th { font-size: 11px; color: #7f8c8d; text-align: left; padding: 8px; border-bottom: 1px solid #eee; }
+        td { font-size: 13px; padding: 8px; border-bottom: 1px solid #f9f9f9; }
+    </style>
+</head>
+<body>
+
+<div id="loading-overlay"><div class="spinner"></div><p id="status-text" style="margin-top:20px; font-weight:bold;">シミュレーター起動中...</p></div>
+
+<div class="container">
+    <a href="index.html" class="home-btn">🏠 Home</a>
+    <header><h1>🚚 Truck Load Simulator v1.0</h1></header>
+
+    <div class="setup-card">
+        <div>
+            <label>1. 最適化済み発注データ (CSV)</label>
+            <input type="file" id="upload-csv" accept=".csv">
+        </div>
+        <div>
+            <label>2. トラック容量 (ケース数)</label>
+            <input type="number" id="truck-cap" value="1000">
+        </div>
+        <button id="run-btn" class="btn-exec">⚡ 積載シミュレーション実行</button>
+    </div>
+
+    <div id="output-area"></div>
+</div>
+
+<script type="py">
+import pandas as pd
+import io, math, asyncio
+from pyscript import when, document
+import js
+
+js.document.getElementById("loading-overlay").style.display = "none"
+
+@when("click", "#run-btn")
+async def simulate(event):
+    overlay = js.document.getElementById("loading-overlay")
+    js.document.getElementById("status-text").innerText = "トラックに積み込み中..."
+    overlay.style.display = "flex"
+    await asyncio.sleep(0.1)
+    
+    try:
+        f = document.getElementById("upload-csv").files
+        if len(f) == 0: return
+        
+        cap = int(document.getElementById("truck-cap").value)
+        text = await f.item(0).text()
+        df = pd.read_csv(io.StringIO(text.replace('\ufeff', '')))
+        
+        # 列名特定
+        qty_col = next((c for c in ['補正後', '補正後発注数', '最適化発注数', '発注数'] if c in df.columns), df.columns[-1])
+        supp_col = next((c for c in ['取引先名', 'サプライヤー名', '組織名'] if c in df.columns), '取引先名')
+        date_col = '日付'
+        
+        # 日付とサプライヤーで集計
+        df_group = df.groupby([date_col, supp_col])[qty_col].sum().reset_index()
+        
+        output_div = js.document.getElementById("output-area")
+        output_div.innerHTML = ""
+
+        for _, row in df_group.iterrows():
+            total_qty = int(row[qty_col])
+            if total_qty == 0: continue
+            
+            num_trucks = math.ceil(total_qty / cap)
+            
+            block_html = f"""
+            <div class="truck-container">
+                <div class="truck-header">
+                    <span>🏢 {row[supp_col]} ／ 📅 {row[date_col]}</span>
+                    <span>合計発注数: {total_qty:,} ケース</span>
+                </div>
+            """
+            
+            remaining = total_qty
+            for i in range(num_trucks):
+                load = min(remaining, cap)
+                percent = int((load / cap) * 100)
+                shortage = cap - load
+                
+                status_label = f"満載案" if percent > 95 else f"空きあり (残り {shortage:,})"
+                status_cls = "full" if percent > 95 else "empty"
+                
+                block_html += f"""
+                <div class="truck-body">
+                    <div style="width: 80px; font-weight:bold;">号車 {i+1}</div>
+                    <div class="truck-visual">
+                        <div class="truck-fill-bar" style="width: {percent}%;"></div>
+                        <div class="truck-label">{load:,} / {cap:,} ({percent}%)</div>
+                    </div>
+                    <div class="stats-badge {status_cls}">{status_label}</div>
+                </div>
+                """
+                remaining -= load
+            
+            # 内訳表の簡易表示
+            df_detail = df[(df[date_col] == row[date_col]) & (df[supp_col] == row[supp_col])]
+            block_html += "<table><thead><tr><th>商品名称</th><th>数量</th></tr></thead><tbody>"
+            for _, d in df_detail.iterrows():
+                if d[qty_col] > 0:
+                    block_html += f"<tr><td>{d['商品名称']}</td><td>{int(d[qty_col]):,}</td></tr>"
+            
+            block_html += "</tbody></table></div>"
+            output_div.innerHTML += block_html
+
+    except Exception as e:
+        js.alert(f"エラー: {str(e)}")
+    finally:
+        overlay.style.display = "none"
+
+</script>
+</body>
+</html>
