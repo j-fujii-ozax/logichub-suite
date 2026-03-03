@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>需要予測・発注情報調整ツール</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <style>
+        /* 全体レイアウト */
+        body { font-family: sans-serif; margin: 20px; background-color: #f9f9f9; color: #333; }
+        .container { background-color: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        h1 { font-size: 1.5rem; border-bottom: 2px solid #0056b3; padding-bottom: 10px; }
+        .controls { margin-bottom: 20px; display: flex; gap: 15px; flex-wrap: wrap; align-items: center; background: #eef2f5; padding: 15px; border-radius: 5px; }
+        .controls label { font-weight: bold; }
+        
+        /* ボタン */
+        .btn { padding: 8px 16px; border: none; border-radius: 4px; background-color: #0056b3; color: white; cursor: pointer; font-size: 1rem; }
+        .btn:hover { background-color: #004494; }
+        .btn-success { background-color: #28a745; }
+        .btn-success:hover { background-color: #218838; }
+        
+        /* テーブルとスクロールエリア */
+        .table-wrapper { overflow-x: auto; overflow-y: auto; max-height: 70vh; margin-top: 10px; border: 1px solid #ccc; position: relative; }
+        table { border-collapse: separate; border-spacing: 0; width: 100%; white-space: nowrap; box-sizing: border-box; }
+        th, td { border-bottom: 1px solid #ccc; border-right: 1px solid #ccc; padding: 8px; text-align: center; box-sizing: border-box; background-color: #fff; }
+        th { background-color: #f4f4f4; position: sticky; top: 0; z-index: 10; border-top: 1px solid #ccc; }
+        input[type="number"] { width: 70px; padding: 4px; text-align: right; }
+
+        /* 列の固定（左側） */
+        .col-fixed-left-1 { position: sticky; left: 0; width: 150px; min-width: 150px; z-index: 5; background-color: #fafafa; border-left: 1px solid #ccc;}
+        .col-fixed-left-2 { position: sticky; left: 150px; width: 250px; min-width: 250px; z-index: 5; background-color: #fafafa; }
+        .col-fixed-left-3 { position: sticky; left: 400px; width: 80px; min-width: 80px; z-index: 5; background-color: #fafafa; }
+        th.col-fixed-left-1, th.col-fixed-left-2, th.col-fixed-left-3 { z-index: 15; background-color: #e9ecef; }
+
+        /* 列の固定（右側：動的に付与） */
+        .col-fixed-right { position: sticky; z-index: 5; background-color: #e8f4f8; font-weight: bold; }
+        .col-fixed-right-grand { position: sticky; right: 0; width: 100px; min-width: 100px; z-index: 6; background-color: #ffeeba; font-weight: bold; }
+        th.col-fixed-right, th.col-fixed-right-grand { z-index: 15; }
+
+        /* ページネーション */
+        .pagination { display: flex; justify-content: space-between; align-items: center; margin-top: 15px; font-weight: bold; }
+        .pagination button { padding: 5px 15px; }
+
+        /* ローディングオーバーレイ */
+        #loadingOverlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255, 255, 255, 0.8); z-index: 9999;
+            display: none; justify-content: center; align-items: center; flex-direction: column;
+        }
+        .spinner {
+            border: 8px solid #f3f3f3; border-top: 8px solid #0056b3;
+            border-radius: 50%; width: 60px; height: 60px;
+            animation: spin 1s linear infinite; margin-bottom: 15px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+<div id="loadingOverlay">
+    <div class="spinner"></div>
+    <h2 id="loadingText">データを読み込んで集計しています...<br>（大容量データの場合、数分かかることがあります）</h2>
+</div>
+
+<div class="container">
+    <h1>発注予測 調整ツール</h1>
+    
+    <div class="controls">
+        <div>
+            <label for="startMonth">調整開始年月:</label>
+            <input type="month" id="startMonth">
+        </div>
+        <div>
+            <label for="csvFile">CSVアップロード:</label>
+            <input type="file" id="csvFile" accept=".csv">
+        </div>
+        <button class="btn" onclick="processCSV()">読み込み・集計</button>
+    </div>
+
+    <div class="controls" id="downloadControls" style="display: none;">
+        <button class="btn btn-success" onclick="downloadCSV('month')">月別データをダウンロード</button>
+        <button class="btn btn-success" onclick="downloadCSV('year')">年別データをダウンロード</button>
+    </div>
+
+    <div class="pagination" id="paginationTop" style="display: none;">
+        <button class="btn" onclick="prevPage()">◀ 前のページ</button>
+        <span id="pageInfoTop"></span>
+        <button class="btn" onclick="nextPage()">次のページ ▶</button>
+    </div>
+
+    <div class="table-wrapper" id="tableContainer"></div>
+
+    <div class="pagination" id="paginationBottom" style="display: none;">
+        <button class="btn" onclick="prevPage()">◀ 前のページ</button>
+        <span id="pageInfoBottom"></span>
+        <button class="btn" onclick="nextPage()">次のページ ▶</button>
+    </div>
+</div>
+
+<script>
+    let globalData = {}; 
+    let monthsSet = new Set();
+    let allMonths = [];  
+    let allYears = [];   
+    let productKeys = []; // ページネーション用
+    
+    // ページネーション設定
+    let currentPage = 1;
+    const itemsPerPage = 50; 
+
+    // 高速化のための日付キャッシュ
+    const dateCache = {};
+
+    function showLoading(text) {
+        document.getElementById('loadingText').innerText = text || '処理中...';
+        document.getElementById('loadingOverlay').style.display = 'flex';
+    }
+
+    function hideLoading() {
+        document.getElementById('loadingOverlay').style.display = 'none';
+    }
+
+    function processCSV() {
+        const fileInput = document.getElementById('csvFile');
+        const startMonth = document.getElementById('startMonth').value;
+
+        if (fileInput.files.length === 0) {
+            alert('CSVファイルを選択してください。');
+            return;
+        }
+
+        showLoading('データを読み込んで集計しています...\n（大容量データの場合、しばらくお待ちください）');
+
+        // 初期化
+        globalData = {};
+        monthsSet = new Set();
+        currentPage = 1;
+
+        const file = fileInput.files[0];
+        
+        Papa.parse(file, {
+            header: true,
+            skipEmptyLines: true,
+            chunk: function(results) {
+                aggregateChunk(results.data, startMonth);
+            },
+            complete: function() {
+                finalizeData();
+            },
+            error: function(err) {
+                hideLoading();
+                alert('読み込みエラー: ' + err.message);
+            }
+        });
+    }
+
+    // 分割されたデータを集計
+    function aggregateChunk(data, startMonth) {
+        data.forEach(row => {
+            const dateStr = row['日付'];
+            if (!dateStr) return;
+
+            // 日付のキャッシュ利用
+            let yyyy_mm = dateCache[dateStr];
+            if (!yyyy_mm) {
+                const parts = dateStr.split('/');
+                if (parts.length < 2) return;
+                yyyy_mm = parts[0] + '-' + parts[1].padStart(2, '0');
+                dateCache[dateStr] = yyyy_mm;
+            }
+
+            if (startMonth && yyyy_mm < startMonth) return;
+
+            const pCode = row['商品コード'];
+            const pName = row['商品名称'];
+            const val = parseFloat(row['中央値']) || 0;
+            const accuracy = row['予測結果精度'] || ''; // 予測精度を取得
+
+            if (!pCode) return;
+
+            if (!globalData[pCode]) {
+                globalData[pCode] = { 
+                    name: pName, 
+                    accuracy: accuracy, // 精度を保存
+                    months: {}
+                };
+            }
+
+            if (!globalData[pCode].months[yyyy_mm]) {
+                globalData[pCode].months[yyyy_mm] = 0;
+            }
+
+            globalData[pCode].months[yyyy_mm] += val;
+            monthsSet.add(yyyy_mm);
+        });
+    }
+
+    function finalizeData() {
+        allMonths = Array.from(monthsSet).sort();
+        
+        let yearsSet = new Set();
+        allMonths.forEach(m => yearsSet.add(m.split('-')[0]));
+        allYears = Array.from(yearsSet).sort();
+        
+        productKeys = Object.keys(globalData).sort();
+
+        document.getElementById('downloadControls').style.display = 'flex';
+        document.getElementById('paginationTop').style.display = 'flex';
+        document.getElementById('paginationBottom').style.display = 'flex';
+
+        renderTable();
+        hideLoading();
+    }
+
+    function renderTable() {
+        const container = document.getElementById('tableContainer');
+        if (productKeys.length === 0) {
+            container.innerHTML = '<p style="padding:10px;">対象となるデータがありません。</p>';
+            return;
+        }
+
+        const totalPages = Math.ceil(productKeys.length / itemsPerPage);
+        document.getElementById('pageInfoTop').innerText = `商品件数: ${productKeys.length}件 ( ${currentPage} / ${totalPages} ページ )`;
+        document.getElementById('pageInfoBottom').innerText = `商品件数: ${productKeys.length}件 ( ${currentPage} / ${totalPages} ページ )`;
+
+        const startIdx = (currentPage - 1) * itemsPerPage;
+        const endIdx = Math.min(startIdx + itemsPerPage, productKeys.length);
+        const pageProducts = productKeys.slice(startIdx, endIdx);
+
+        // 列幅の定義（右側固定用）
+        const grandTotalWidth = 100;
+        const yearColWidth = 100;    
+
+        let html = '<table><thead><tr>';
+        html += '<th class="col-fixed-left-1">商品コード</th>';
+        html += '<th class="col-fixed-left-2">商品名称</th>';
+        html += '<th class="col-fixed-left-3">予測精度</th>';
+
+        allYears.forEach(year => {
+            const monthsInYear = allMonths.filter(m => m.startsWith(year));
+            monthsInYear.forEach(m => { html += `<th>${m}</th>`; });
+        });
+
+        // 右固定ヘッダー（年合計のみ）
+        allYears.forEach((year, index) => {
+            const yearsAfter = allYears.length - 1 - index;
+            const rightPosTotal = grandTotalWidth + (yearsAfter * yearColWidth);
+
+            html += `<th class="col-fixed-right" style="right: ${rightPosTotal}px; width: ${yearColWidth}px; min-width: ${yearColWidth}px;">${year}年 合計</th>`;
+        });
+        
+        html += `<th class="col-fixed-right-grand">総合計</th>`;
+        html += '</tr></thead><tbody>';
+
+        // データ行生成
+        pageProducts.forEach(pCode => {
+            const pData = globalData[pCode];
+            html += `<tr>`;
+            html += `<td class="col-fixed-left-1">${pCode}</td>`;
+            html += `<td class="col-fixed-left-2" title="${pData.name}">${pData.name}</td>`;
+            html += `<td class="col-fixed-left-3">${pData.accuracy}</td>`;
+
+            let grandTotal = 0;
+            let yearTotals = {};
+
+            // 月別入力欄 ＆ 合計の事前計算
+            allYears.forEach(year => {
+                const monthsInYear = allMonths.filter(m => m.startsWith(year));
+                let yearTotal = 0;
+
+                monthsInYear.forEach(m => {
+                    const val = pData.months[m] || 0;
+                    yearTotal += val;
+                    
+                    html += `<td><input type="number" class="val-input" value="${val}" min="0" 
+                                data-pcode="${pCode}" data-month="${m}" data-year="${year}"></td>`;
+                });
+                
+                yearTotals[year] = yearTotal;
+                grandTotal += yearTotal;
+            });
+
+            // 右固定セル（年合計のみ）
+            allYears.forEach((year, index) => {
+                const yearsAfter = allYears.length - 1 - index;
+                const rightPosTotal = grandTotalWidth + (yearsAfter * yearColWidth);
+
+                html += `<td class="col-fixed-right" style="right: ${rightPosTotal}px;" id="total-${pCode}-${year}">
+                            ${Math.round(yearTotals[year] * 100) / 100}
+                         </td>`;
+            });
+
+            html += `<td class="col-fixed-right-grand" id="grand-${pCode}">${Math.round(grandTotal * 100) / 100}</td>`;
+            html += `</tr>`;
+        });
+
+        html += '</tbody></table>';
+        container.innerHTML = html;
+        
+        container.scrollTop = 0;
+        container.scrollLeft = 0;
+    }
+
+    // 値変更時の動的計算
+    document.getElementById('tableContainer').addEventListener('change', function(e) {
+        if (e.target.classList.contains('val-input')) {
+            const inputElem = e.target;
+            const pCode = inputElem.getAttribute('data-pcode');
+            const month = inputElem.getAttribute('data-month');
+            const year = inputElem.getAttribute('data-year');
+            const newVal = parseFloat(inputElem.value) || 0;
+
+            globalData[pCode].months[month] = newVal;
+
+            let yearTotal = 0;
+            let grandTotal = 0;
+
+            allMonths.forEach(m => {
+                const val = globalData[pCode].months[m] || 0;
+                grandTotal += val;
+                if (m.startsWith(year)) {
+                    yearTotal += val;
+                }
+            });
+
+            document.getElementById(`total-${pCode}-${year}`).innerText = Math.round(yearTotal * 100) / 100;
+            document.getElementById(`grand-${pCode}`).innerText = Math.round(grandTotal * 100) / 100;
+        }
+    });
+
+    // ページ遷移機能
+    function prevPage() {
+        if (currentPage > 1) {
+            currentPage--;
+            renderTable();
+        }
+    }
+
+    function nextPage() {
+        const totalPages = Math.ceil(productKeys.length / itemsPerPage);
+        if (currentPage < totalPages) {
+            currentPage++;
+            renderTable();
+        }
+    }
+
+    // CSVダウンロード
+    function downloadCSV(type) {
+        showLoading('ダウンロード用のデータを生成しています...');
+        
+        setTimeout(() => {
+            let csvContent = "\uFEFF"; 
+            
+            if (type === 'month') {
+                csvContent += "商品コード,商品名称,予測精度,年月,発注予測数\n";
+                productKeys.forEach(pCode => {
+                    const pData = globalData[pCode];
+                    allMonths.forEach(m => {
+                        const val = pData.months[m] || 0;
+                        csvContent += `"${pCode}","${pData.name}","${pData.accuracy}","${m}",${val}\n`;
+                    });
+                });
+            } else if (type === 'year') {
+                csvContent += "商品コード,商品名称,予測精度,年,発注予測数\n";
+                productKeys.forEach(pCode => {
+                    const pData = globalData[pCode];
+                    allYears.forEach(year => {
+                        let yearTotal = 0;
+                        allMonths.filter(m => m.startsWith(year)).forEach(m => {
+                            yearTotal += (pData.months[m] || 0);
+                        });
+                        csvContent += `"${pCode}","${pData.name}","${pData.accuracy}","${year}",${yearTotal}\n`;
+                    });
+                });
+            }
+
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            const url = URL.createObjectURL(blob);
+            link.setAttribute("href", url);
+            link.setAttribute("download", `発注予測調整結果_${type}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            hideLoading();
+        }, 100);
+    }
+</script>
+
+</body>
+</html>
