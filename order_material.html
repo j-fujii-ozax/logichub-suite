@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>発注計画ツール</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 20px;
+            background-color: #f9f9f9;
+            color: #333;
+        }
+        h1 {
+            font-size: 24px;
+            border-bottom: 2px solid #4CAF50;
+            padding-bottom: 5px;
+        }
+        .container {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            font-weight: bold;
+            display: inline-block;
+            width: 250px;
+        }
+        input[type="file"], input[type="month"] {
+            padding: 5px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .action-buttons {
+            margin-top: 15px;
+            display: none;
+        }
+        .rules {
+            background-color: #e8f5e9;
+            border-left: 4px solid #4CAF50;
+            padding: 10px;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+        .rules ul {
+            margin: 5px 0 0 0;
+            padding-left: 20px;
+        }
+        
+        .table-container {
+            width: 100%;
+            max-height: 70vh;
+            overflow: auto;
+            background-color: #fff;
+            border: 1px solid #ddd;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        table {
+            border-collapse: separate;
+            border-spacing: 0;
+            min-width: 100%;
+        }
+        th, td {
+            border-right: 1px solid #ddd;
+            border-bottom: 1px solid #ddd;
+            padding: 8px;
+            text-align: right;
+            white-space: nowrap;
+            background-color: #fff;
+        }
+        th {
+            background-color: #4CAF50;
+            color: white;
+            text-align: center;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        td.text-left {
+            text-align: left;
+        }
+        input.edit-num {
+            width: 80px;
+            text-align: right;
+            padding: 4px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        input.edit-num:focus {
+            outline: none;
+            border-color: #4CAF50;
+            background-color: #e8f5e9;
+        }
+
+        /* --- 列の固定（Sticky）設定 --- */
+        .sticky-col-1 { position: sticky; left: 0; min-width: 100px; max-width: 100px; z-index: 5; }
+        .sticky-col-2 { position: sticky; left: 117px; min-width: 200px; max-width: 200px; z-index: 5; }
+        .sticky-col-3 { position: sticky; left: 334px; min-width: 60px; max-width: 60px; z-index: 5; text-align: center;}
+        .sticky-col-right { position: sticky; right: 0; min-width: 100px; z-index: 5; background-color: #f1f8e9; font-weight: bold; border-left: 2px solid #4CAF50;}
+        
+        th.sticky-col-1, th.sticky-col-2, th.sticky-col-3, th.sticky-col-right {
+            z-index: 15;
+            background-color: #388E3C; 
+        }
+    </style>
+</head>
+<body>
+
+    <h1>構成品 発注計画ツール</h1>
+
+    <div class="rules">
+        <strong>【月ごとの発注数量集計ルール】（※数量は全て kg 単位・小数点以下四捨五入の整数）</strong>
+        <ul>
+            <li>リードタイム 60日以下：1ヶ月毎の合計</li>
+            <li>リードタイム 61日～90日：3ヶ月ごとの合計を1カ月目に代入</li>
+            <li>リードタイム 91日～180日：6ヶ月ごとの合計を1カ月目に代入</li>
+            <li>リードタイム 181日以上：12ヵ月分の合計を1カ月目に代入</li>
+        </ul>
+    </div>
+
+    <div class="container">
+        <div class="form-group">
+            <label for="masterFile">「商品マスタ」CSV:</label>
+            <input type="file" id="masterFile" accept=".csv">
+        </div>
+        <div class="form-group">
+            <label for="orderFile">「発注情報 / 在庫起点予測」CSV:</label>
+            <input type="file" id="orderFile" accept=".csv">
+        </div>
+        <div class="form-group">
+            <label>集計期間 (From - To):</label>
+            <input type="month" id="monthFrom"> ～ 
+            <input type="month" id="monthTo">
+        </div>
+        <button onclick="startProcessing()" id="btnStart">集計開始</button>
+
+        <div class="action-buttons" id="actionButtons">
+            <button onclick="downloadExcel()" style="background-color: #217346;">表形式でダウンロード（Excel）</button>
+            <button onclick="downloadCSV()" style="background-color: #0078D7;">発注調整データをダウンロード（CSV）</button>
+        </div>
+    </div>
+
+    <div class="table-container" id="resultContainer">
+        </div>
+
+    <script>
+        let masterDataMap = {};
+        let globalAggregatedData = [];
+        let globalMonthHeaders = [];
+
+        async function startProcessing() {
+            const masterFile = document.getElementById('masterFile').files[0];
+            const orderFile = document.getElementById('orderFile').files[0];
+            const monthFrom = document.getElementById('monthFrom').value;
+            const monthTo = document.getElementById('monthTo').value;
+
+            if (!masterFile || !orderFile || !monthFrom || !monthTo) {
+                alert("すべてのファイルと集計期間を入力してください。");
+                return;
+            }
+            if (monthFrom > monthTo) {
+                alert("集計期間のFromはToより前の月を指定してください。");
+                return;
+            }
+
+            document.getElementById('btnStart').disabled = true;
+            document.getElementById('btnStart').innerText = "処理中...";
+
+            try {
+                const masterRows = await parseCSV(masterFile);
+                const orderRows = await parseCSV(orderFile);
+
+                masterDataMap = {};
+                masterRows.forEach(row => {
+                    const code = row['ユーザー商品コード'];
+                    const lt = parseInt(row['標準リードタイム'], 10);
+                    if (code && !isNaN(lt)) {
+                        masterDataMap[code] = {
+                            name: row['商品名'],
+                            lt: lt,
+                            supplierCode: row['取引先コード'] || '',
+                            supplierName: row['取引先名'] || ''
+                        };
+                    }
+                });
+
+                globalMonthHeaders = generateMonthList(monthFrom, monthTo);
+                const aggregated = {};
+
+                orderRows.forEach(row => {
+                    const dateStr = row['日付'];
+                    
+                    // 2種類のCSVフォーマットに対応（存在する方の列名から取得）
+                    const code = row['構成品コード'] || row['商品コード'];
+                    let name = row['構成品名'] || row['商品名称'];
+                    const rawQty = row['数量'] || row['発注数'];
+                    
+                    const qtyGrams = parseFloat(rawQty);
+
+                    if (!dateStr || !code || isNaN(qtyGrams)) return;
+
+                    const dateObj = new Date(dateStr);
+                    if (isNaN(dateObj.getTime())) return;
+                    
+                    const yyyy = dateObj.getFullYear();
+                    const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+                    const monthKey = `${yyyy}-${mm}`;
+
+                    if (monthKey < monthFrom || monthKey > monthTo) return;
+
+                    if (!aggregated[code]) {
+                        const masterInfo = masterDataMap[code] || { name: name, lt: 0, supplierCode: '', supplierName: '' };
+                        aggregated[code] = {
+                            code: code,
+                            name: masterInfo.name || name,
+                            lt: masterInfo.lt,
+                            supplierCode: masterInfo.supplierCode,
+                            supplierName: masterInfo.supplierName,
+                            monthlyData: {}
+                        };
+                    }
+
+                    // kgに変換
+                    const qtyKg = qtyGrams / 1000;
+                    if (!aggregated[code].monthlyData[monthKey]) {
+                        aggregated[code].monthlyData[monthKey] = 0;
+                    }
+                    aggregated[code].monthlyData[monthKey] += qtyKg;
+                });
+
+                // ルール適応と配列化
+                globalAggregatedData = Object.values(aggregated).map(item => {
+                    const rawValues = globalMonthHeaders.map(m => Math.round(item.monthlyData[m] || 0));
+                    const processedValues = applyLeadTimeRules(rawValues, item.lt);
+                    item.processedValues = processedValues;
+                    item.total = processedValues.reduce((sum, val) => sum + val, 0);
+                    return item;
+                });
+
+                renderTable();
+                
+                document.getElementById('actionButtons').style.display = 'block';
+
+            } catch (error) {
+                console.error(error);
+                alert("エラーが発生しました: " + error.message);
+            } finally {
+                document.getElementById('btnStart').disabled = false;
+                document.getElementById('btnStart').innerText = "集計開始";
+            }
+        }
+
+        function parseCSV(file) {
+            return new Promise((resolve, reject) => {
+                Papa.parse(file, {
+                    header: true,
+                    skipEmptyLines: true,
+                    complete: results => resolve(results.data),
+                    error: error => reject(error)
+                });
+            });
+        }
+
+        function generateMonthList(from, to) {
+            const list = [];
+            let current = new Date(from + "-01");
+            const endDate = new Date(to + "-01");
+            while (current <= endDate) {
+                const yyyy = current.getFullYear();
+                const mm = String(current.getMonth() + 1).padStart(2, '0');
+                list.push(`${yyyy}-${mm}`);
+                current.setMonth(current.getMonth() + 1);
+            }
+            return list;
+        }
+
+        function applyLeadTimeRules(values, lt) {
+            let result = [...values];
+            let step = 1;
+
+            if (lt <= 60) step = 1;
+            else if (lt >= 61 && lt <= 90) step = 3;
+            else if (lt >= 91 && lt <= 180) step = 6;
+            else if (lt >= 181) step = 12;
+
+            if (step > 1) {
+                for (let i = 0; i < result.length; i += step) {
+                    let sum = 0;
+                    for (let j = 0; j < step && (i + j) < result.length; j++) {
+                        sum += result[i + j];
+                        if (j > 0) result[i + j] = 0;
+                    }
+                    result[i] = sum;
+                }
+            }
+            return result;
+        }
+
+        function renderTable() {
+            const container = document.getElementById('resultContainer');
+            if (globalAggregatedData.length === 0) {
+                container.innerHTML = "<p style='padding:10px;'>指定された条件のデータが見つかりませんでした。</p>";
+                return;
+            }
+
+            globalAggregatedData.sort((a, b) => a.code.localeCompare(b.code));
+
+            let html = `<table id="resultTable"><thead><tr>
+                        <th class="sticky-col-1">商品コード</th>
+                        <th class="sticky-col-2">商品名</th>
+                        <th class="sticky-col-3">LT(日)</th>`;
+            globalMonthHeaders.forEach(m => {
+                html += `<th>${m}</th>`;
+            });
+            html += `<th class="sticky-col-right">年間合計数 (kg)</th></tr></thead><tbody>`;
+
+            globalAggregatedData.forEach((row, rowIndex) => {
+                html += `<tr>
+                            <td class="sticky-col-1 text-left">${escapeHTML(row.code)}</td>
+                            <td class="sticky-col-2 text-left">${escapeHTML(row.name)}</td>
+                            <td class="sticky-col-3">${row.lt}</td>`;
+                
+                row.processedValues.forEach((val, colIndex) => {
+                    html += `<td>
+                                <input type="number" step="1" class="edit-num" 
+                                    value="${roundVal(val)}" 
+                                    data-row="${rowIndex}" data-col="${colIndex}" 
+                                    onchange="updateTotal(this)">
+                             </td>`;
+                });
+                
+                html += `<td class="sticky-col-right row-total" id="total-${rowIndex}">
+                            ${formatNumber(row.total)}
+                         </td>
+                        </tr>`;
+            });
+
+            html += `</tbody></table>`;
+            container.innerHTML = html;
+        }
+
+        function updateTotal(inputObj) {
+            const rowIndex = inputObj.getAttribute('data-row');
+            const colIndex = inputObj.getAttribute('data-col');
+            const newValue = Math.round(parseFloat(inputObj.value)) || 0;
+            
+            inputObj.value = newValue;
+
+            globalAggregatedData[rowIndex].processedValues[colIndex] = newValue;
+            const newTotal = globalAggregatedData[rowIndex].processedValues.reduce((sum, val) => sum + val, 0);
+            globalAggregatedData[rowIndex].total = newTotal;
+
+            document.getElementById(`total-${rowIndex}`).innerText = formatNumber(newTotal);
+        }
+
+        function downloadExcel() {
+            const wsData = [];
+            const header = ['商品コード', '商品名', 'LT(日)', ...globalMonthHeaders, '年間合計数 (kg)'];
+            wsData.push(header);
+            
+            globalAggregatedData.forEach(row => {
+                const rowData = [
+                    row.code,
+                    row.name,
+                    row.lt,
+                    ...row.processedValues.map(v => roundVal(v)),
+                    roundVal(row.total)
+                ];
+                wsData.push(rowData);
+            });
+
+            const ws = XLSX.utils.aoa_to_sheet(wsData);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "発注計画表");
+            XLSX.writeFile(wb, "発注計画表.xlsx");
+        }
+
+        function downloadCSV() {
+            const csvData = [];
+            csvData.push(['日付', '商品コード', '商品名', '数量', '取引先コード', '取引先名称']);
+            
+            globalAggregatedData.forEach(row => {
+                row.processedValues.forEach((val, index) => {
+                    if (val !== 0) {
+                        const monthStr = globalMonthHeaders[index];
+                        const dateStr = monthStr.replace('-', '/') + '/01';
+                        
+                        csvData.push([
+                            dateStr,
+                            row.code,
+                            row.name,
+                            roundVal(val),
+                            row.supplierCode,
+                            row.supplierName
+                        ]);
+                    }
+                });
+            });
+
+            const csvText = Papa.unparse(csvData);
+            const blob = new Blob([new Uint8Array([0xEF, 0xBB, 0xBF]), csvText], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = "発注調整データ.csv";
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function formatNumber(num) {
+            if (num === 0) return "0";
+            return num.toLocaleString(undefined, { maximumFractionDigits: 0 });
+        }
+
+        function roundVal(num) {
+            return Math.round(num);
+        }
+
+        function escapeHTML(str) {
+            if (!str) return '';
+            return String(str).replace(/[&<>"']/g, match => {
+                const escape = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+                return escape[match];
+            });
+        }
+    </script>
+</body>
+</html>
