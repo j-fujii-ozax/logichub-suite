@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>発注入力ツール（月別集計対応）</title>
+    <style>
+        body { font-family: sans-serif; margin: 20px; background-color: #f4f7f9; color: #333; }
+        .container { max-width: 1150px; margin: auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
+        h1 { font-size: 1.4rem; color: #1a73e8; border-bottom: 3px solid #1a73e8; padding-bottom: 10px; margin-bottom: 20px; }
+        .controls { display: flex; gap: 12px; margin-bottom: 20px; background: #eef2f7; padding: 15px; border-radius: 8px; align-items: center; flex-wrap: wrap; }
+        #searchBox, #monthFilter { padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+        #monthFilter { font-weight: bold; background: #fff; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th { background: #444; color: white; padding: 12px; text-align: left; cursor: pointer; position: sticky; top: 0; user-select: none; }
+        th:hover { background: #555; }
+        td { padding: 12px; border-bottom: 1px solid #eee; }
+        tr:hover { background-color: #f8fbff; }
+        .qty { font-size: 1.4rem; font-weight: bold; color: #d93025; }
+        .code { font-family: monospace; color: #185abc; font-weight: bold; }
+        .done { background-color: #e6f4ea !important; color: #888; }
+        .done td { text-decoration: line-through; }
+        input[type="checkbox"] { transform: scale(1.6); cursor: pointer; }
+        .summary-badge { background: #1a73e8; color: white; padding: 8px 15px; border-radius: 20px; font-weight: bold; font-size: 0.9rem; }
+        .no-data { text-align: center; padding: 50px; color: #999; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>📦 発注入力サポート（月別集計機能）</h1>
+    <div class="controls">
+        <input type="file" id="csvFile" accept=".csv">
+        <select id="monthFilter"><option value="all">すべて表示</option></select>
+        <input type="text" id="searchBox" placeholder="商品名やコードで検索...">
+        <div class="summary-badge" id="summary">0 件 / 合計 0 個</div>
+    </div>
+    <table id="targetTable">
+        <thead>
+            <tr>
+                <th style="width: 50px;">済</th>
+                <th data-sort="date">日付</th>
+                <th data-sort="code">商品コード</th>
+                <th data-sort="name">商品名称</th>
+                <th data-sort="qty">発注数</th>
+            </tr>
+        </thead>
+        <tbody id="tableBody">
+            <tr><td colspan="5" class="no-data">CSV（UTF-8）を読み込んでください</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<script>
+    let allData = [];
+    let sortDirection = { key: 'date', asc: true };
+
+    const fileInput = document.getElementById('csvFile');
+    const tableBody = document.getElementById('tableBody');
+    const searchBox = document.getElementById('searchBox');
+    const monthFilter = document.getElementById('monthFilter');
+    const summary = document.getElementById('summary');
+
+    fileInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (event) => parseCSV(event.target.result);
+        reader.readAsText(file, "UTF-8");
+    });
+
+    function parseCSV(text) {
+        const lines = text.split(/\r?\n/).filter(line => line.trim() !== "");
+        if (lines.length < 2) return;
+        
+        allData = [];
+        const months = new Set();
+
+        for (let i = 1; i < lines.length; i++) {
+            const cols = lines[i].split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(c => c.replace(/^"|"$/g, '').trim());
+            const qty = parseInt(cols[11], 10) || 0;
+            if (qty > 0) {
+                const dateStr = cols[4] || "";
+                const month = dateStr.substring(0, 7); // "2025/09" 形式を抽出
+                if (month) months.add(month);
+                
+                allData.push({ date: dateStr, month: month, code: cols[2], name: cols[3], qty: qty });
+            }
+        }
+
+        // 月別フィルターの更新
+        monthFilter.innerHTML = '<option value="all">すべての月を表示</option>';
+        Array.from(months).sort().forEach(m => {
+            monthFilter.innerHTML += `<option value="${m}">${m.replace('/', '年')}月</option>`;
+        });
+
+        render();
+    }
+
+    function render() {
+        const term = searchBox.value.toLowerCase();
+        const selectedMonth = monthFilter.value;
+
+        let displayData = allData.filter(d => {
+            const matchSearch = d.name.toLowerCase().includes(term) || d.code.includes(term);
+            const matchMonth = selectedMonth === 'all' || d.month === selectedMonth;
+            return matchSearch && matchMonth;
+        });
+
+        // 並べ替え
+        if (sortDirection.key) {
+            displayData.sort((a, b) => {
+                let valA = a[sortDirection.key];
+                let valB = b[sortDirection.key];
+                const res = (typeof valA === 'string') ? valA.localeCompare(valB) : valA - valB;
+                return sortDirection.asc ? res : -res;
+            });
+        }
+
+        tableBody.innerHTML = '';
+        let totalQty = 0;
+        displayData.forEach(item => {
+            totalQty += item.qty;
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td style="text-align:center"><input type="checkbox" onchange="this.closest('tr').classList.toggle('done')"></td>
+                <td>${item.date}</td>
+                <td class="code">${item.code}</td>
+                <td>${item.name}</td>
+                <td class="qty">${item.qty}</td>
+            `;
+            tableBody.appendChild(tr);
+        });
+
+        summary.textContent = `${displayData.length} 件 / 発注合計 ${totalQty.toLocaleString()} 個`;
+    }
+
+    // ヘッダークリックで並べ替え
+    document.querySelectorAll('th[data-sort]').forEach(th => {
+        th.addEventListener('click', () => {
+            const key = th.getAttribute('data-sort');
+            sortDirection.asc = (sortDirection.key === key) ? !sortDirection.asc : true;
+            sortDirection.key = key;
+            render();
+        });
+    });
+
+    searchBox.oninput = render;
+    monthFilter.onchange = render;
+</script>
+</body>
+</html>
